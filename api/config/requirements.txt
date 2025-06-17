@@ -1,0 +1,10 @@
+matplotlib
+numpy
+pix2text 
+doclayout_yolo 
+pdf2image
+pandas
+opencv-python
+uvicorn
+fastapi
+python-multipart

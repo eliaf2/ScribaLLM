@@ -1,0 +1,17 @@
+services:
+  scriballm:
+    build: ./app
+    container_name: frontend
+    command: streamlit run main.py --server.port=8501 --server.address=0.0.0.0
+    ports:
+      - "8080:8501"
+    volumes:
+      - ./app:/app:ro
+
+  apimodel:
+    build: ./api
+    container_name: api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./api:/api:ro

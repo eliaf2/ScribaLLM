@@ -1,0 +1,11 @@
+google-genai
+openai
+matplotlib
+numpy
+streamlit>=1.28
+streamlit-feedback
+pandas
+pdf2image
+langchain-core
+langchain[google-genai]
+langchain[openai]
