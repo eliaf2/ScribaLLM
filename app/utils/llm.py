@@ -59,8 +59,8 @@ class OCR_LLM:
         response = self.llm.invoke(self.history_messages)
         if isinstance(response, AIMessage):
             self.history_messages.append(response)
-            logging.debug(f'Tokens used: {self.llm.get_num_tokens(self.history_messages)}')
-            return response.content
+            logging.debug(f"Tokens used: {response.usage_metadata['total_tokens'] if hasattr(response, 'usage_metadata') and response.usage_metadata else 'N/A'}")
+            return response
         else:
             logging.error(
                 "Error in OCR_LLM call: response is not an AIMessage.")

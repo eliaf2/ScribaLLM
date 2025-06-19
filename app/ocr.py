@@ -232,7 +232,7 @@ if st.button("Convert to Text"):
     refined_text = ocr_model.refine(ocr_list) if ocr_list else None
 
     if ocr_list:
-        text_ocr = "<br>".join(ocr_list)
+        text_ocr = "<br>".join(map(str, ocr_list))
     else:
         text_ocr = None
 

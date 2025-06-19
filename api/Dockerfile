@@ -13,8 +13,8 @@ RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Verifica che libGL.so.1 sia presente
-RUN ldconfig -p | grep libGL.so.1 || echo "libGL.so.1 non trovata"
+# Check that libGL.so.1 is found
+RUN ldconfig -p | grep libGL.so.1 || echo "libGL.so.1 not found"
 
 COPY config/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
