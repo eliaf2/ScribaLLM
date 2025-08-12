@@ -2,20 +2,40 @@ import streamlit as st
 import requests
 import json
 import logging
+import base64
+import os
+import re
 import matplotlib.pyplot as plt
 from pdf2image import convert_from_bytes  # type: ignore
-import os
 from matplotlib.patches import Rectangle
-from utils.llm import OCR_LLM
+from utils.llm import OCR_LLM, ImageOut
 from PIL import Image
 
 tmp_dir: str = "/ScribaLLM/tmp"
 tmp_file_path: str = os.path.join(tmp_dir, "uploaded_file.pdf")
 tmp_jpg_dir: str = os.path.join(tmp_dir, "jpg")
-tmp_crop_dir = os.path.join(tmp_dir, "cropped")
+tmp_crop_dir: str = os.path.join(tmp_dir, "cropped")
+
 
 @st.cache_resource
 def call_layout_detection_api(file: bytes, confidence: float) -> dict | None:
+    '''Call the layout detection API.
+
+    Parameters
+    ----------
+    file : bytes
+        Image in bytes format from pdf file to analyzed.
+    confidence : float
+        Confidence threshold for layout detection.
+
+    Returns
+    -------
+    dict | None
+        JSON response from the API containing layout detection results or None if an error occurs.
+
+    Example of output:
+    {'results': [{'name': 'isolate_formula', 'class': 8, 'confidence': 0.50954, 'box': {'x1': 149.06, 'y1': 201.92, 'x2': 1560.45, 'y2': 328.20}}, ...]}
+    '''
     logging.debug("Calling layout detection API")
     response = requests.post(
         "http://api:8000/layout-detection/",
@@ -29,40 +49,105 @@ def call_layout_detection_api(file: bytes, confidence: float) -> dict | None:
         return None
 
 
-# @st.cache_resource
-def ocr_llm():
-    openai_api_key = st.session_state.openai_api_key
-    google_api_key = st.session_state.gemini_api_key
+def filter_detection(detections: list, types: list[str] = []) -> list:
+    '''Filter the detection results based on the specified types.
 
-    ocr = OCR_LLM(openai_api_key=openai_api_key, google_api_key=google_api_key, context="")
+    Parameters
+    ----------
+    detections : list
+        List of detection results.
+    types : list[str], optional
+        List of types to filter the detections. If empty, all detections are returned.
+
+    Returns
+    -------
+    list
+        List of filtered detection results.
+    '''
+    if not types:
+        return [json.loads(det) if isinstance(det, str) else det for det in detections]
+    filter_detection = []
+    for page in range(len(detections)):
+        page_filter_detection = []
+        page_detection = json.loads(detections[page]) if isinstance(
+            detections[page], str) else detections[page]
+        for det in page_detection:
+            if det["name"] in types:
+                page_filter_detection.append(det)
+
+        filter_detection.append(page_filter_detection)
+
+    return filter_detection if filter_detection else []
+
+
+# @st.cache_resource
+def ocr_llm() -> tuple[list[str] | None, OCR_LLM]:
+    '''Perform OCR on cropped images using llm models. Look at the OCR_LLM class in utils/llm.py for more details.
+
+    Returns
+    -------
+    tuple[list[str] | None, OCR_LLM]
+        A tuple containing a list of OCR results in markdown format or None if no text is detected, and the OCR_LLM instance used for processing.
+    '''
+    openai_api_key = st.session_state.openai_api_key
+    gemini_api_key = st.session_state.gemini_api_key
+
+    ocr = OCR_LLM(openai_api_key=openai_api_key,
+                  gemini_api_key=gemini_api_key, context=st.session_state.context)
     ocr_results = list()
-    for filename in os.listdir(tmp_crop_dir):
-        if filename.lower().endswith(".jpg"):
-            image_path = os.path.join(tmp_crop_dir, filename)
-            logging.debug(f"Performing OCR on image: {image_path}")
+    for page_folder in sorted(os.listdir(tmp_crop_dir)):
+        cropped_images_path = os.path.join(tmp_crop_dir, page_folder)
+        if os.path.isdir(cropped_images_path):
+            logging.debug(f"Performing OCR on image: {cropped_images_path}")
             try:
-                result = ocr(image_path)
+                result = ocr(os.path.join(
+                    tmp_jpg_dir, f"{page_folder}.jpg"), cropped_images_path)
                 if result:
                     ocr_results.append(result)
             except Exception as e:
-                logging.error(f"Error performing OCR on {image_path}: {e}")
-                st.error(f"Error performing OCR on {image_path}. Check logs for details.")
-    
+                logging.error(
+                    f"Error performing OCR on {cropped_images_path}: {e}")
+                st.error(
+                    f"Error performing OCR on {cropped_images_path}. Check logs for details.")
+
     if ocr_results:
         # return "\n".join(ocr_results)
         return ocr_results, ocr
     else:
         logging.warning("No OCR results found.")
-        st.warning("No text detected in the images. Please check the cropped images.")
+        st.warning(
+            "No text detected in the images. Please check the cropped images.")
         return None, ocr
 
 
-def plot_detection_frames(page, det_json):
+def plot_detection_frames(page: Image.Image, det_json: list) -> None:
+    '''Plot the detection frames on the given page image.
+
+    Parameters
+    ----------
+    page : Image.Image
+        Image of the page where detections will be plotted.
+    det_json : list
+        List containing the detection results with bounding boxes and labels. Each element must be in the format:
+        {
+            "name": str,
+            "class": int,
+            "box": {
+                "x1": int,
+                "y1": int,
+                "x2": int,
+                "y2": int
+            },
+
+            "confidence": float
+        }\n
+        for each detection.\nThe ```class``` field is not used in this function.
+    '''
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.imshow(page)
     ax.axis('off')
 
-    for det in json.loads(det_json):
+    for det in det_json:
         box = det["box"]
         x1, y1, x2, y2 = box["x1"], box["y1"], box["x2"], box["y2"]
         rect = Rectangle(
@@ -85,19 +170,34 @@ def plot_detection_frames(page, det_json):
 
     st.pyplot(fig)
 
-def clean_directory(directory_path: str):
+
+def clear_directory(directory_path: str) -> None:
+    '''Removes all files in the ```directory_path```.
+
+    Parameters
+    ----------
+    directory_path : str
+        Path to the directory to be cleaned.
+    '''
     for filename in os.listdir(directory_path):
         file_path = os.path.join(directory_path, filename)
         if os.path.isfile(file_path):
             os.remove(file_path)
+        elif os.path.isdir(file_path):
+            clear_directory(file_path)
+            os.rmdir(file_path)
     logging.debug(f"Cleaned directory: {directory_path}")
 
+
 def save_cropped_images():
+    '''
+    Save cropped images from the ```tmp_jpg_dir``` directory to the ```tmp_crop_dir``` directory based on the detection results.
+    '''
     global tmp_jpg_dir, tmp_crop_dir
     os.makedirs(tmp_crop_dir, exist_ok=True)
-    clean_directory(tmp_crop_dir)
+    clear_directory(tmp_crop_dir)
     logging.debug(f"Saving cropped images in {tmp_crop_dir}")
-    
+
     for filename in os.listdir(tmp_jpg_dir):
         if filename.lower().endswith(".jpg"):
             jpg_path = os.path.join(tmp_jpg_dir, filename)
@@ -105,31 +205,120 @@ def save_cropped_images():
             det_json = st.session_state.detection_results[page_index]
             img = Image.open(jpg_path)
 
+            page_crop_dir = os.path.join(tmp_crop_dir, str(page_index))
+            os.makedirs(page_crop_dir, exist_ok=True)
+
             counter = 0
-            det_list = sorted(json.loads(det_json), key=lambda det: det["box"]["y1"])
+            det_list = sorted(det_json, key=lambda det: det["box"]["y1"])
             for det in det_list:
                 box = det["box"]
                 x1, y1, x2, y2 = box["x1"], box["y1"], box["x2"], box["y2"]
                 cropped_img = img.crop((x1, y1, x2, y2))
-                cropped_path = os.path.join(tmp_crop_dir, f"{page_index}_{counter}.jpg")  # First number is the page index, second is the index of the element
+                cropped_path = os.path.join(
+                    page_crop_dir, f"{counter}.jpg")
                 cropped_img.save(cropped_path)
                 logging.debug(f"Cropped image saved: {cropped_path}")
                 counter += 1
 
+
 def plot_cropped_images():
+    '''Display cropped images from the ```tmp_crop_dir``` directory in the Streamlit app.
+    '''
     global tmp_crop_dir
-    st.write("### Cropped Images")
     if not os.listdir(tmp_crop_dir):
         st.warning("No cropped images found. Please perform OCR first.")
         return
 
-    for filename in sorted(os.listdir(tmp_crop_dir)):
-        if filename.lower().endswith(".jpg"):
-            img_path = os.path.join(tmp_crop_dir, filename)
-            st.image(img_path, caption=filename, use_container_width=False)
-            logging.debug(f"Displaying cropped image: {img_path}")
+    for page_num in sorted(os.listdir(tmp_crop_dir)):
+        page_folder_path = os.path.join(tmp_crop_dir, page_num)
+        for filename in os.listdir(page_folder_path):
+            if filename.lower().endswith(".jpg"):
+                img_path = os.path.join(page_folder_path, filename)
+                st.image(img_path, caption=filename, use_container_width=False)
+                logging.debug(f"Displaying cropped image: {img_path}")
 
-# Page display
+
+def clear_md(text: str) -> str:
+    '''Clear Markdown formatting from the text.
+
+    Parameters
+    ----------
+    text : str
+        The input text with Markdown formatting.
+
+    Returns
+    -------
+    str
+        The text without Markdown formatting.
+    '''
+    if text.startswith("```markdown"):
+        text = text[11:]  # Remove "```markdown" at beginning of the string
+    if text.endswith("```"):
+        text = text[:-3]  # Remove "```" at the end of the string
+    return text
+
+
+def get_base64_image(image_path: str) -> str | None:
+    '''Converts a local image to base64
+
+    Parameters
+    ----------
+    image_path : str
+        Path to the image file.
+
+    Returns
+    -------
+    str | None
+        Base64-encoded image string or None if the image is not found.
+    '''
+    try:
+        with open(image_path, "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode()
+    except FileNotFoundError:
+        st.error(f"Image not found: {image_path}")
+        return None
+
+
+def convert_markdown_images_to_base64(markdown_text: str, clear: bool = False) -> str:
+    '''Converts Markdown image references to base64 HTML
+
+    Parameters
+    ----------
+    markdown_text : str
+        The input Markdown text containing image references.
+    clear : bool, optional
+        Whether to clear Markdown formatting from the text, by default False
+
+    Returns
+    -------
+    str
+        The HTML output with images converted to base64.
+    '''
+    def replace_image(match: re.Match) -> str:
+        alt_text: str = match.group(1)
+        image_path: str = match.group(2)
+
+        if os.path.exists(image_path):
+            img_base64 = get_base64_image(image_path)
+            if img_base64:
+                ext: str = os.path.splitext(image_path)[1].lower()
+                mime_type: str = "image/jpeg" if ext in [
+                    '.jpg', '.jpeg'] else f"image/{ext[1:]}"
+
+                return f'<img src="data:{mime_type};base64,{img_base64}" alt="{alt_text}" style="max-width: 70%; height: auto;">'
+
+        # If the image does not exist, show a placeholder
+        return f'<div style="border: 2px dashed #ccc; padding: 20px; text-align: center;">⚠️ Image not found: {image_path}</div>'
+
+    if clear:
+        markdown_text = clear_md(markdown_text)
+
+    # Pattern to find ![alt text](path/to/image.ext)
+    pattern: str = r'!\[(.*?)\]\((.*?)\)'
+    return re.sub(pattern, replace_image, markdown_text)
+
+
+# ================ Page display ================
 st.write('# OCR 📝')
 
 st.write('## Upload a PDF file to perform OCR')
@@ -137,21 +326,20 @@ uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
 uploaded_file_name = uploaded_file.name if uploaded_file else None
 
 if 'page_index' not in st.session_state:
-    st.session_state.page_index = 0  
-
+    st.session_state.page_index = 0
 
 if uploaded_file is not None and ('uploaded_filename' not in st.session_state or st.session_state.uploaded_filename != uploaded_file_name):
     st.session_state["uploaded_filename"] = uploaded_file.name
-    st.session_state.page_index = 0 
+    st.session_state.page_index = 0
 
     os.makedirs(tmp_dir, exist_ok=True)
     os.makedirs(tmp_jpg_dir, exist_ok=True)
     with open(tmp_file_path, "wb") as f:
-        f.write(uploaded_file.getvalue()) 
+        f.write(uploaded_file.getvalue())
 
-    pages = convert_from_bytes(uploaded_file.getvalue(), dpi=300) 
+    pages = convert_from_bytes(uploaded_file.getvalue(), dpi=300)
 
-    clean_directory(tmp_jpg_dir)
+    clear_directory(tmp_jpg_dir)
 
     for i, page in enumerate(pages):
         jpg_path = os.path.join(tmp_jpg_dir, f"{i}.jpg")
@@ -161,7 +349,7 @@ if uploaded_file is not None and ('uploaded_filename' not in st.session_state or
 
 st.write('## Layout Detection')
 
-if "conf" not in st.session_state:
+if "conf" not in st.session_state:  # Set the confidence threshold
     st.session_state.conf = 0.1
 
 st.session_state.conf = st.slider(
@@ -176,9 +364,11 @@ st.session_state.conf = st.slider(
 with open(tmp_file_path, "rb") as file:
     tmp_file: bytes = file.read()
 response = call_layout_detection_api(tmp_file, st.session_state.conf)
+response = filter_detection(response["results"], types=[
+                            'figure']) if response else []
 
-if response and "results" in response:
-    st.session_state.detection_results = response["results"]
+if response:
+    st.session_state.detection_results = response
     st.session_state.pages = convert_from_bytes(tmp_file, dpi=300)
 else:
     st.error("No results found or error in response.")
@@ -216,30 +406,35 @@ if "detection_results" in st.session_state:
     det_json = st.session_state.detection_results[st.session_state.page_index]
 
     save_cropped_images()
-    plot_detection_frames(page, det_json)
+    plot_detection_frames(page, det_json)   # type: ignore
 
     st.write("### Layout Detection Results")
     plot_cropped_images()
 
 st.write('# Conversion')
+if "context" in st.session_state:
+    context = st.text_input("Context", value=st.session_state.context)
+else:
+    context = st.text_input(
+        "Context", placeholder="Write a brief summary of the PDF content here.")
+    if context:
+        st.session_state.context = context
+
+if "ocr_output" not in st.session_state:
+    st.session_state.ocr_output = []
 
 if st.button("Convert to Text"):
     save_cropped_images()
-    ocr_list, ocr_model = ocr_llm()
+    st.session_state.ocr_output, llm = ocr_llm()
     logging.debug("OCR conversion completed.")
-    logging.debug(f"OCR results: {ocr_list}")
+    logging.debug(f"OCR results: {st.session_state.ocr_output}")
 
-    refined_text = ocr_model.refine(ocr_list) if ocr_list else None
-
-    if ocr_list:
-        text_ocr = "<br>".join(map(str, ocr_list))
-    else:
-        text_ocr = None
-
-    if text_ocr:
-        st.write("### OCR Result")
-        st.markdown(refined_text, unsafe_allow_html=True)
-    else:
-        st.error("OCR failed or no text detected.")
+st.write("### OCR Results")
+if st.session_state.ocr_output == []:
+    st.markdown("**Click the button to convert the PDF to text using OCR.**")
 else:
-    st.write("Click the button to convert the PDF to text using OCR.")
+    for page_md in st.session_state.ocr_output:  # type: ignore
+        if isinstance(page_md[0], str):
+            st.markdown(convert_markdown_images_to_base64(page_md[0], clear=True), unsafe_allow_html=True)
+        else:
+            st.error("OCR output is not in the expected format.")
