@@ -146,12 +146,14 @@ class OCR_LLM:
         Classification Rules:
         - Return 'text' if the image contains:
         * Any readable text (handwritten or printed)
-        * Mathematical formulas or equations  
+        * Mathematical formulas or equations 
         * Code snippets
         * Any form of written content or symbols
         
         - Return 'picture' if the image contains:
-        * Charts/graphs with text labels
+        * Charts/graphs with text or formulas/equation labels
+        * Diagrams with text labels or annotations
+        * Quantum Circuits with labels or annotations
         * Artwork, drawings, or illustrations without text
         * Screenshots of documents
 
@@ -184,7 +186,7 @@ class OCR_LLM:
 
                 if response and response.classification:    # type: ignore
                     st.write(
-                        f"Image: {image_path} classified as {response.classification}. It talks about {response.description}") # type: ignore
+                        f"Image: {image_path} classified as {response.classification}. It talks about {response.description}")  # type: ignore
 
                     if response.classification == "picture":    # type: ignore
                         state['list_pictures'].append(ImageOut(
@@ -301,3 +303,90 @@ class OCR_LLM:
                                 })
 
         return call['text'], call['list_pictures']
+
+    def improve_ocr_result(self, ocr_results: list[str], context: str) -> str:
+
+        ocr_improvement_prompt = f"""You are tasked with improving OCR-converted text while preserving its original text, structure and formatting. Please follow these guidelines:
+
+            1. **Correct OCR errors**: Fix misread characters, words, and spacing issues
+            2. **Preserve markdown formatting**: Maintain all original markdown syntax including lists, emphasis, code blocks, tables, etc.
+            3. **Fix headers**: Using the context of the document, insert appropriate headers where necessary.
+            4. **Fix LaTeX formulas**: Correct formatting errors in mathematical expressions while preserving their mathematical meaning
+            5. **Preserve image links**: Do NOT modify any URLs or links that reference images
+
+            ## Specific Rules:
+
+            ### Text Correction:
+            - Fix obvious character recognition errors (e.g., "rn" misread as "m", "cl" as "d", "0" as "O")
+            - Correct spacing issues and word boundaries
+            - Fix punctuation errors
+            - Maintain the original language and writing style
+
+            ### Markdown Formatting:
+            - Keep all headers (#, ##, ###, etc.) intact
+            - Preserve bullet points, numbered lists, and indentation
+            - Maintain emphasis markers (**, *, ~~, etc.)
+            - Keep code blocks (```) and inline code (``) formatting
+            - Maintain block quotes (>) and other markdown elements
+            - Maintain blockquotes (>) and other markdown elements
+
+            ### LaTeX Mathematical Expressions:
+            - Fix syntax errors in LaTeX formulas (missing brackets, incorrect commands, etc.)
+            - Correct common OCR mistakes in mathematical notation:
+            - Greek letters
+            - Mathematical operators
+            - Fraction notation
+            - Ensure proper bracket matching and command structure
+
+            ### Image Links:
+            - **NEVER modify image URLs or file paths**
+            - Keep all image reference syntax intact: `![alt text](image_url)` or `<img src="..."/>`
+            - Preserve any image-related markdown or HTML tags
+
+            ### Quality Control:
+            - Read the text in context to ensure corrections make logical sense
+            - When uncertain about a correction, err on the side of minimal changes
+            - Maintain consistency in terminology and formatting throughout the document
+
+            ## Output Format:
+            Return only the corrected text with no additional commentary, explanations, or metadata. The output should be ready to use as-is.
+
+            ---
+
+            **The text talks about:** {context}"""
+        
+        ocr_correction_prompt = f"""You are an OCR correction specialist. Your task is to fix OCR conversion errors in the following markdown text and rewrite it in a more readable format.
+
+        STRICT RULES:
+        - Do NOT remove any content or information from the original text
+        - Do NOT summarize or condense any sections
+        - You may ONLY ADD content (formatting, punctuation, line breaks, headers, etc.)
+        - Fix obvious OCR errors (character misrecognition, spacing issues, etc.)
+        - Improve formatting and structure for better readability
+        - Add proper markdown formatting where appropriate
+        - Maintain the original meaning and all details
+
+        The original OCR text is provided by the user.
+
+        Please provide the corrected and improved version while preserving ALL original content."""
+
+        temperature = 0.3
+
+        if not self.openai_api_key and not self.gemini_api_key:
+            raise ValueError(
+                "No API key provided. Please set either OpenAI or Gemini API key.")
+        elif self.gemini_api_key:
+            optimizer_llm = init_chat_model(model=self.gemini_llm_model, model_provider="google_genai",
+                                       api_key=self.gemini_api_key, temperature=temperature)
+        elif self.openai_api_key:
+            optimizer_llm = init_chat_model(model=self.openai_llm_model, model_provider="openai",
+                                       api_key=self.openai_api_key, temperature=temperature)
+
+        text = ''
+        for page in ocr_results:
+            text += ''.join(page) + '\n\n'
+
+        new_message = HumanMessage(content=text)
+        response = optimizer_llm.invoke([SystemMessage(content=ocr_correction_prompt)] + [new_message])
+
+        return response.content if response else text    # type: ignore

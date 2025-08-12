@@ -5,6 +5,8 @@ import logging
 import base64
 import os
 import re
+import io
+import zipfile
 import matplotlib.pyplot as plt
 from pdf2image import convert_from_bytes  # type: ignore
 from matplotlib.patches import Rectangle
@@ -279,6 +281,22 @@ def get_base64_image(image_path: str) -> str | None:
         return None
 
 
+def fix_url_pictures(markdown_text: str) -> str:
+    '''Fixes corrupted URLs in the Markdown text.
+
+    Parameters
+    ----------
+    markdown_text : str
+        The input Markdown text containing image references.
+
+    Returns
+    -------
+    str
+        The Markdown text with fixed URLs.
+    '''
+    return re.sub(r'(?<!/)(ScribaLLM/tmp/cropped)', r'/\1', markdown_text)
+
+
 def convert_markdown_images_to_base64(markdown_text: str, clear: bool = False) -> str:
     '''Converts Markdown image references to base64 HTML
 
@@ -308,7 +326,9 @@ def convert_markdown_images_to_base64(markdown_text: str, clear: bool = False) -
                 return f'<img src="data:{mime_type};base64,{img_base64}" alt="{alt_text}" style="max-width: 70%; height: auto;">'
 
         # If the image does not exist, show a placeholder
-        return f'<div style="border: 2px dashed #ccc; padding: 20px; text-align: center;">⚠️ Image not found: {image_path}</div>'
+        logging.warning(
+            f"Markdown line with missing image: ![{alt_text}]({image_path})")
+        return f'<div style="border: 2px dashed #ccc; padding: 20px; text-align: center;">⚠️ Markdown line with missing image: <code>![{alt_text}]({image_path})</code></div>'
 
     if clear:
         markdown_text = clear_md(markdown_text)
@@ -316,6 +336,35 @@ def convert_markdown_images_to_base64(markdown_text: str, clear: bool = False) -
     # Pattern to find ![alt text](path/to/image.ext)
     pattern: str = r'!\[(.*?)\]\((.*?)\)'
     return re.sub(pattern, replace_image, markdown_text)
+
+
+def make_zip_file(text: str, list_images: list[ImageOut]) -> bytes:
+    '''Creates a ZIP file containing the text and images.
+
+    Parameters
+    ----------
+    text : str
+        The text content to include in the ZIP file.
+    list_images : list[ImageOut]
+        The list of images to include in the ZIP file.
+
+    Returns
+    -------
+    bytes
+        The bytes of the created ZIP file.
+    '''
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w") as zip_file:
+        for img in list_images:
+            with open(img.path, "rb") as img_file:
+                image_path_zip = os.path.join(
+                    "img", os.path.relpath(img.path, tmp_crop_dir))
+                text = text.replace(img.path, image_path_zip)
+                zip_file.writestr(image_path_zip, img_file.read())
+
+        zip_file.writestr("text.md", text.encode('utf-8'))
+
+    return zip_buffer.getvalue()
 
 
 # ================ Page display ================
@@ -426,6 +475,20 @@ if "ocr_output" not in st.session_state:
 if st.button("Convert to Text"):
     save_cropped_images()
     st.session_state.ocr_output, llm = ocr_llm()
+
+    st.session_state.ocr_output_text_list = []
+    st.session_state.ocr_output_pictures_list = []
+    for page in st.session_state.ocr_output:    # type: ignore
+        st.session_state.ocr_output_text_list.append(page[0])
+        st.session_state.ocr_output_pictures_list.append(page[1])
+
+    st.session_state.ocr_output_pictures_list = [
+        item for sublist in st.session_state.ocr_output_pictures_list for item in sublist
+    ]
+
+    st.session_state.ocr_output = llm.improve_ocr_result(
+        st.session_state.ocr_output_text_list, st.session_state.context)
+    st.session_state.ocr_output = fix_url_pictures(st.session_state.ocr_output)
     logging.debug("OCR conversion completed.")
     logging.debug(f"OCR results: {st.session_state.ocr_output}")
 
@@ -433,8 +496,13 @@ st.write("### OCR Results")
 if st.session_state.ocr_output == []:
     st.markdown("**Click the button to convert the PDF to text using OCR.**")
 else:
-    for page_md in st.session_state.ocr_output:  # type: ignore
-        if isinstance(page_md[0], str):
-            st.markdown(convert_markdown_images_to_base64(page_md[0], clear=True), unsafe_allow_html=True)
-        else:
-            st.error("OCR output is not in the expected format.")
+    if isinstance(st.session_state.ocr_output, str):
+        st.markdown(convert_markdown_images_to_base64(
+            st.session_state.ocr_output, clear=False), unsafe_allow_html=True)
+        st.download_button(
+            label="Download",
+            data=make_zip_file(st.session_state.ocr_output,
+                               st.session_state.ocr_output_pictures_list),
+            file_name="output.zip",
+            mime="application/zip"
+        )
