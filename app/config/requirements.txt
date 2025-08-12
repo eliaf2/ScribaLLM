@@ -9,3 +9,4 @@ pdf2image
 langchain-core
 langchain[google-genai]
 langchain[openai]
+langgraph
