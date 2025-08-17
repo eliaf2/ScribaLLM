@@ -32,7 +32,7 @@ openai_api_key = st.text_input(
     '**OpenAI API Key**',
     type='password',
     placeholder='api',
-    value=st.session_state.openai_api_key,
+    value=st.session_state.get('openai_api_key', ''),
     help='Enter your OpenAI API key to RAG capabilities.',
 )
 

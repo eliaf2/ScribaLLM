@@ -1,14 +1,27 @@
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import SystemMessage, AIMessage, HumanMessage, ToolMessage
-from typing import TypedDict, Literal
-from pydantic import BaseModel, Field
-from langgraph.graph import StateGraph, END
+from typing import TypedDict, Literal, List, Dict, Any
+from pydantic import BaseModel, Field, SecretStr
+from langgraph.graph import StateGraph, END, MessagesState
 import base64
+from dataclasses import dataclass
 from PIL import Image
 from io import BytesIO
 import os
 import streamlit as st
 import logging
+import shutil
+import hashlib
+import json
+from pathlib import Path
+from datetime import datetime
+from langchain_community.document_loaders import DirectoryLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.schema import Document
+from langchain_openai import OpenAIEmbeddings
+from langchain_chroma import Chroma
+from langchain.tools.retriever import create_retriever_tool
+from langgraph.prebuilt import ToolNode, tools_condition
 
 
 class ImageClassificationStructure(BaseModel):
@@ -45,7 +58,7 @@ class OCR_LLM:
     openai_llm_model = 'gpt-4.1-nano'
     temperature = 0.2
 
-    def __init__(self, openai_api_key=None, gemini_api_key=None, context: str = ''):
+    def __init__(self, openai_api_key: SecretStr, gemini_api_key: SecretStr, context: str = ''):
         self.openai_api_key = openai_api_key
         self.gemini_api_key = gemini_api_key
         self.context = context if context else "converting written text to digital format"
@@ -56,18 +69,22 @@ class OCR_LLM:
         elif self.gemini_api_key:
             self.llm = init_chat_model(model=self.gemini_llm_model, model_provider="google_genai",
                                        api_key=self.gemini_api_key, temperature=self.temperature)
+            logging.info(
+                f"OCR_LLM initialized successfully with model: {self.gemini_llm_model}")
         elif self.openai_api_key:
             self.llm = init_chat_model(model=self.openai_llm_model, model_provider="openai",
                                        api_key=self.openai_api_key, temperature=self.temperature)
+            logging.info(
+                f"OCR_LLM initialized successfully with model: {self.openai_llm_model}")
 
         self.classifier_llm = self.llm.with_structured_output(
             ImageClassificationStructure)
 
         self.graph = StateGraph(AgentState)
 
-        self.graph.add_node("classification", self.llm_classifier)
+        self.graph.add_node("classification", self._llm_classifier)
         self.graph.set_entry_point("classification")
-        self.graph.add_node("ocr", self.ocr_function)
+        self.graph.add_node("ocr", self._ocr_function)
 
         self.graph.add_edge("classification", "ocr")
         self.graph.add_edge("ocr", END)
@@ -76,7 +93,7 @@ class OCR_LLM:
 
     # ======== Methods for the graph ========
     @staticmethod
-    def compress_image(
+    def _compress_image(
         input_path: str,
         size_scale: float = 0.3,
         quality: int = 10,
@@ -127,7 +144,7 @@ class OCR_LLM:
         new_img = Image.open(buffer)
         return new_img
 
-    def llm_classifier(self, state: AgentState) -> AgentState:
+    def _llm_classifier(self, state: AgentState) -> AgentState:
         '''Classify the pictures in the ```pictures_folder``` either as text or picture.
 
         Parameters
@@ -166,7 +183,7 @@ class OCR_LLM:
                 state['pictures_folder'], image_path)
             if image_path.endswith(('.png', '.jpg', '.jpeg')):
                 with BytesIO() as buffer:
-                    self.compress_image(image_full_path).save(
+                    self._compress_image(image_full_path).save(
                         buffer, format="JPEG")
                     image_b64_compressed = base64.b64encode(
                         buffer.getvalue()).decode("utf-8")
@@ -185,8 +202,8 @@ class OCR_LLM:
                 )
 
                 if response and response.classification:    # type: ignore
-                    st.write(
-                        f"Image: {image_path} classified as {response.classification}. It talks about {response.description}")  # type: ignore
+                    logging.info(
+                        f"Image: {image_path} classified as {response.classification}. It talks about {response.description}")      # type: ignore
 
                     if response.classification == "picture":    # type: ignore
                         state['list_pictures'].append(ImageOut(
@@ -195,7 +212,7 @@ class OCR_LLM:
         return state
 
     @staticmethod
-    def create_prompt_with_images(state: AgentState) -> str:
+    def _create_prompt_with_images(state: AgentState) -> str:
         '''Creates a prompt string that includes the base prompt and image insertion instructions.
 
         Parameters
@@ -248,7 +265,7 @@ class OCR_LLM:
 
         return base_prompt + example
 
-    def ocr_function(self, state: AgentState) -> dict:
+    def _ocr_function(self, state: AgentState) -> dict:
         '''Perform OCR on the images in the provided state.
 
         Parameters
@@ -261,7 +278,7 @@ class OCR_LLM:
         dict
             The OCR results for the images.
         '''
-        system_prompt = self.create_prompt_with_images(state)
+        system_prompt = self._create_prompt_with_images(state)
         response = self.llm.invoke(
             [SystemMessage(content=system_prompt)] + list(state['messages'])[-1:])
         return {
@@ -354,7 +371,7 @@ class OCR_LLM:
             ---
 
             **The text talks about:** {context}"""
-        
+
         ocr_correction_prompt = f"""You are an OCR correction specialist. Your task is to fix OCR conversion errors in the following markdown text and rewrite it in a more readable format.
 
         STRICT RULES:
@@ -377,16 +394,616 @@ class OCR_LLM:
                 "No API key provided. Please set either OpenAI or Gemini API key.")
         elif self.gemini_api_key:
             optimizer_llm = init_chat_model(model=self.gemini_llm_model, model_provider="google_genai",
-                                       api_key=self.gemini_api_key, temperature=temperature)
+                                            api_key=self.gemini_api_key, temperature=temperature)
         elif self.openai_api_key:
             optimizer_llm = init_chat_model(model=self.openai_llm_model, model_provider="openai",
-                                       api_key=self.openai_api_key, temperature=temperature)
+                                            api_key=self.openai_api_key, temperature=temperature)
 
         text = ''
         for page in ocr_results:
             text += ''.join(page) + '\n\n'
 
         new_message = HumanMessage(content=text)
-        response = optimizer_llm.invoke([SystemMessage(content=ocr_correction_prompt)] + [new_message])
+        response = optimizer_llm.invoke(
+            [SystemMessage(content=ocr_correction_prompt)] + [new_message])
 
         return response.content if response else text    # type: ignore
+
+# =======================================
+
+
+@dataclass
+class ChromaConfig:
+    chroma_path: str = "chroma"
+    data_path: str = "data"
+    chunk_size: int = 1000
+    chunk_overlap: int = 200
+    collection_name: str = "rag_documents"
+    file_pattern: str = "*.md"
+    embedding_model: str = "text-embedding-3-small"
+    batch_size: int = 100
+    force_rebuild: bool = False
+
+
+class ChromaVectorStore:
+    def __init__(self, config: ChromaConfig, openai_api_key: SecretStr):
+        self.config = config
+        self.embeddings = None
+        self.db = None
+        self.metadata_file = Path(config.chroma_path) / \
+            "document_metadata.json"
+        self.openai_api_key = openai_api_key
+
+    def _initialize_embeddings(self) -> None:
+        '''Initialize OpenAI embeddings with error handling.
+        '''
+        try:
+            self.embeddings = OpenAIEmbeddings(
+                model=self.config.embedding_model,
+                api_key=self.openai_api_key,
+                max_retries=3,
+                request_timeout=60  # type: ignore
+            )
+            # Test the embedding connection
+            test_embedding = self.embeddings.embed_query("test")
+            logging.info(
+                f"Embeddings initialized successfully with model: {self.config.embedding_model}")
+        except Exception as e:
+            logging.error(f"Failed to initialize embeddings: {e}")
+            st.error(
+                "Failed to initialize embeddings. Please check your API key and model configuration.")
+            raise
+
+    def _load_existing_metadata(self) -> Dict[str, Any]:
+        '''Load existing document metadata for incremental updates.
+
+        Returns
+        -------
+        Dict[str, Any]
+            A dictionary containing the document metadata.
+        '''
+        if self.metadata_file.exists():
+            try:
+                with open(self.metadata_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                logging.warning(f"Failed to load metadata file: {e}")
+        return {"documents": {}, "last_updated": None}
+
+    def _save_metadata(self, metadata: Dict[str, Any]) -> None:
+        '''Save document metadata for future incremental updates.
+
+        Parameters
+        ----------
+        metadata : Dict[str, Any]
+            A dictionary containing the document metadata.
+        '''
+        try:
+            os.makedirs(Path(self.config.chroma_path), exist_ok=True)
+            metadata["last_updated"] = datetime.now().isoformat()
+            with open(self.metadata_file, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=2)
+        except Exception as e:
+            logging.error(f"Failed to save metadata: {e}")
+
+    def _calculate_source_hash(self, documents_from_source: List[Document]) -> str:
+        '''Calculate hash of all documents from a single source file.
+
+        Parameters
+        ----------
+        documents_from_source : List[Document]
+            A list of Document objects representing the source documents.
+
+        Returns
+        -------
+        str
+            The MD5 hash of the combined content and metadata.
+        '''
+        combined_content = "".join(
+            [doc.page_content for doc in documents_from_source])
+        basic_metadata = {k: v for k, v in documents_from_source[0].metadata.items()
+                          if k in ['source', 'filename'] and not k.startswith('chunk')}
+        combined_metadata = str(sorted(basic_metadata.items()))
+        return hashlib.md5((combined_content + combined_metadata).encode('utf-8')).hexdigest()
+
+    def load_documents(self) -> List[Document]:
+        '''Load documents from the specified directory with comprehensive error handling.
+
+        Returns
+        -------
+        List[Document]
+            A list of Document objects representing the loaded documents.
+
+        Raises
+        ------
+        ValueError
+            If no documents are found or if an error occurs during loading.
+        '''
+        try:
+            logging.info(
+                f"Loading documents from: {self.config.data_path}")
+            loader = DirectoryLoader(
+                self.config.data_path,
+                glob=self.config.file_pattern,
+                show_progress=True,
+                use_multithreading=True
+            )
+            documents = loader.load()
+
+            if not documents:
+                raise ValueError(
+                    f"No documents found in {self.config.data_path} with pattern {self.config.file_pattern}")
+
+            logging.info(
+                f"Successfully loaded {len(documents)} documents for embedding.")
+            return documents
+
+        except Exception as e:
+            logging.error(f"Failed to load documents: {e}")
+            raise
+
+    def split_documents(self, documents: List[Document]) -> List[Document]:
+        '''Split documents into chunks with optimized parameters.
+
+        Parameters
+        ----------
+        documents : List[Document]
+            A list of Document objects to be split into chunks.
+
+        Returns
+        -------
+        List[Document]
+            A list of Document objects representing the split chunks.
+        '''
+        try:
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=self.config.chunk_size,
+                chunk_overlap=self.config.chunk_overlap,
+                length_function=len,
+                add_start_index=True,
+                separators=["\n\n", "\n", " ", ""]
+            )
+
+            chunks = text_splitter.split_documents(documents)
+
+            for i, chunk in enumerate(chunks):
+                chunk.metadata.update({
+                    "chunk_id": i,
+                    "chunk_size": len(chunk.page_content),
+                    "total_chunks": len(chunks)
+                })
+
+            logging.info(
+                f"Split {len(documents)} documents into {len(chunks)} chunks")
+
+            if chunks:
+                sample_chunk = chunks[min(10, len(chunks) - 1)]
+                logging.debug(
+                    f"Sample chunk content: {sample_chunk.page_content[:200]}...")
+                logging.debug(
+                    f"Sample chunk metadata: {sample_chunk.metadata}")
+
+            return chunks
+
+        except Exception as e:
+            logging.error(f"Failed to split documents: {e}")
+            raise
+
+    def _needs_update(self, documents: List[Document]) -> tuple[bool, List[Document]]:
+        '''Determine if the database needs to be updated based on the provided documents.
+
+        Parameters
+        ----------
+        documents : List[Document]
+            A list of Document objects to check for updates.
+
+        Returns
+        -------
+        tuple[bool, List[Document]]
+            A tuple containing a boolean indicating if an update is needed,
+            and a list of Document objects that are new or changed.
+        '''
+        if self.config.force_rebuild:
+            logging.info(
+                "Force rebuild requested, processing all documents.")
+            return True, documents
+
+        existing_metadata = self._load_existing_metadata()
+        new_documents = []
+
+        # Group documents by source file to avoid processing chunks individually
+        documents_by_source = {}
+        for doc in documents:
+            source = doc.metadata.get('source', 'unknown')
+            if source not in documents_by_source:
+                documents_by_source[source] = []
+            documents_by_source[source].append(doc)
+
+        # Check each source file for changes
+        for source, docs in documents_by_source.items():
+            combined_content = "".join([doc.page_content for doc in docs])
+            combined_metadata = str(sorted(docs[0].metadata.items()))
+            doc_hash = hashlib.md5(
+                (combined_content + combined_metadata).encode('utf-8')).hexdigest()
+
+            if source not in existing_metadata["documents"] or \
+               existing_metadata["documents"][source] != doc_hash:
+                new_documents.extend(docs)
+                logging.debug(f"Source file changed: {source}")
+            else:
+                logging.debug(f"Source file unchanged: {source}")
+
+        needs_update = len(new_documents) > 0
+        if needs_update:
+            changed_sources = set(doc.metadata.get(
+                'source', 'unknown') for doc in new_documents)
+            logging.info(
+                f"Found changes in {len(changed_sources)} source files, processing {len(new_documents)} documents.")
+        else:
+            logging.info("No document changes detected, skipping update.")
+
+        return needs_update, new_documents
+
+    def _process_chunks_in_batches(self, chunks: List[Document]) -> None:
+        '''Process chunks in batches for better memory management.
+
+        Parameters
+        ----------
+        chunks : List[Document]
+            A list of Document objects to be processed in batches.
+        '''
+        total_batches = (len(chunks) + self.config.batch_size -
+                         1) // self.config.batch_size
+
+        for i in range(0, len(chunks), self.config.batch_size):
+            batch = chunks[i:i + self.config.batch_size]
+            batch_num = (i // self.config.batch_size) + 1
+
+            try:
+                logging.info(
+                    f"Processing batch {batch_num}/{total_batches} ({len(batch)} chunks)")
+
+                if self.db is None:
+                    self.db = Chroma.from_documents(
+                        batch,
+                        self.embeddings,
+                        persist_directory=self.config.chroma_path,
+                        collection_name=self.config.collection_name
+                    )
+                else:
+                    self.db.add_documents(batch)
+
+            except Exception as e:
+                logging.error(f"Failed to process batch {batch_num}: {e}")
+                raise
+
+    def save_to_chroma(self, chunks: List[Document]) -> None:
+        '''Save chunks to Chroma with incremental update support and batch processing.
+
+        Parameters
+        ----------
+        chunks : List[Document]
+            A list of Document objects to be saved to Chroma.
+        '''
+        try:
+            if not self.embeddings:
+                self._initialize_embeddings()
+
+            documents = self.load_documents()
+            needs_update, documents_to_process = self._needs_update(documents)
+
+            if not needs_update and not self.config.force_rebuild:
+                logging.info("Vector database is up to date.")
+                return
+
+            if self.config.force_rebuild and os.path.exists(self.config.chroma_path):
+                logging.info("Removing existing database for rebuild.")
+                shutil.rmtree(self.config.chroma_path)
+
+            if documents_to_process:
+                chunks_to_process = self.split_documents(documents_to_process)
+
+                logging.info(
+                    f"Saving {len(chunks_to_process)} chunks from {len(documents_to_process)} changed documents to Chroma.")
+
+                if not self.config.force_rebuild and os.path.exists(self.config.chroma_path):
+                    self.db = Chroma(
+                        persist_directory=self.config.chroma_path,
+                        embedding_function=self.embeddings,
+                        collection_name=self.config.collection_name
+                    )
+
+                self._process_chunks_in_batches(chunks_to_process)
+
+                metadata = self._load_existing_metadata()
+
+                documents_by_source = {}
+                for doc in documents:
+                    source = doc.metadata.get('source', 'unknown')
+                    if source not in documents_by_source:
+                        documents_by_source[source] = []
+                    documents_by_source[source].append(doc)
+
+                for source, docs in documents_by_source.items():
+                    doc_hash = self._calculate_source_hash(docs)
+                    metadata["documents"][source] = doc_hash
+
+                self._save_metadata(metadata)
+
+                logging.info(
+                    f"Successfully saved {len(chunks_to_process)} chunks to {self.config.chroma_path}.")
+
+        except Exception as e:
+            logging.error(f"Failed to save to Chroma: {e}")
+            raise
+
+    def get_database_stats(self) -> Dict[str, Any]:
+        '''Get statistics about the current database.
+
+        Returns
+        -------
+        Dict[str, Any]
+            A dictionary containing database statistics.
+        '''
+        try:
+            if not os.path.exists(self.config.chroma_path):
+                return {"status": "Database not found"}
+
+            if not self.embeddings:
+                self._initialize_embeddings()
+
+            db = Chroma(
+                persist_directory=self.config.chroma_path,
+                embedding_function=self.embeddings,
+                collection_name=self.config.collection_name
+            )
+
+            collection = db._collection
+            stats = {
+                "status": "Active",
+                "total_documents": collection.count(),
+                "database_path": self.config.chroma_path,
+                "collection_name": self.config.collection_name,
+                "embedding_model": self.config.embedding_model
+            }
+
+            if self.metadata_file.exists():
+                metadata = self._load_existing_metadata()
+                stats["last_updated"] = metadata.get("last_updated")
+                stats["tracked_documents"] = len(metadata.get("documents", {}))
+
+            return stats
+
+        except Exception as e:
+            logging.error(f"Failed to get database stats: {e}")
+            return {"status": "Error", "error": str(e)}
+
+    def generate_data_store(self) -> None:
+        '''Generate the vector data store from the loaded documents.
+        '''
+        try:
+            logging.info("Starting vector database generation")
+
+            documents = self.load_documents()
+
+            needs_update, _ = self._needs_update(documents)
+
+            if not needs_update and not self.config.force_rebuild:
+                logging.info(
+                    "No changes detected, database is already up to date.")
+                stats = self.get_database_stats()
+                logging.info(f"Current database stats: {stats}")
+                return
+
+            chunks = self.split_documents(documents)
+
+            self.save_to_chroma(chunks)
+
+            # Display final stats
+            stats = self.get_database_stats()
+            logging.info(f"Database generation completed. Stats: {stats}")
+
+        except Exception as e:
+            logging.error(f"Vector database generation failed: {e}")
+            raise
+
+# =======================================
+
+
+class ChatbotMessagesState(MessagesState):
+    human_msg_positions: list[int]
+
+
+class GradeDocuments(BaseModel):
+    binary_score: Literal["yes", "no"] = Field(
+        description="Relevance score: 'yes' if relevant, or 'no' if not relevant"
+    )
+
+
+class ChatbotLLM:
+    openai_llm_model = 'gpt-4.1-nano'
+    openai_llm_model_grader = 'gpt-4.1-nano'
+    temperature = 1.0
+
+    def __init__(self, openai_api_key: SecretStr, chroma_config: ChromaConfig):
+        self.openai_api_key = openai_api_key
+        self.chroma_config = chroma_config
+
+        self.llm = init_chat_model(model=self.openai_llm_model, model_provider="openai",
+                                   api_key=self.openai_api_key, temperature=self.temperature)
+        self.grader_model = init_chat_model(model=self.openai_llm_model_grader, model_provider="openai",
+                                            api_key=self.openai_api_key, temperature=0.0)
+        self.grader_model = self.grader_model.with_structured_output(
+            GradeDocuments)
+
+        self.vectorstore = Chroma(
+            persist_directory=self.chroma_config.chroma_path,
+            embedding_function=OpenAIEmbeddings(
+                api_key=openai_api_key, model=self.chroma_config.embedding_model),
+            collection_name=self.chroma_config.collection_name
+        )
+        self.retriever = self.vectorstore.as_retriever()
+        retriever_description = f"""Use this tool to search the user’s private technical notes when a question may involve detailed, 
+        domain-specific, or previously recorded information. The notes include high-level technical content in mathematics, 
+        physics, and science (such as formulas, derivations, definitions, proofs, physical laws, and scientific explanations). 
+        Always call this tool if the user requests specific technical details or asks about 
+        concepts that may be more accurate, complete, or personalized if retrieved from their notes rather than general knowledge."""
+
+        self.retriever_tool = create_retriever_tool(
+            retriever=self.retriever,
+            name="NotesRetriever",
+            description=retriever_description
+        )
+
+        self.graph = StateGraph(ChatbotMessagesState)
+
+        self.graph.add_node("generate_query_or_respond",
+                            self._generate_query_or_respond)
+        self.graph.add_node("retrieve", ToolNode([self.retriever_tool]))
+        self.graph.add_node("rewrite_question", self._rewrite_question)
+        self.graph.add_node("generate_answer", self._generate_answer)
+
+        self.graph.set_entry_point("generate_query_or_respond")
+
+        self.graph.add_conditional_edges(
+            "generate_query_or_respond",
+            tools_condition,
+            {
+                "tools": "retrieve",
+                END: END,
+            },
+        )
+
+        self.graph.add_conditional_edges(
+            "retrieve",
+            self._grade_documents,
+        )
+        self.graph.add_edge("generate_answer", END)
+        self.graph.add_edge("rewrite_question", "generate_query_or_respond")
+
+        self.app = self.graph.compile()
+
+    def _rewrite_question(self, state: ChatbotMessagesState) -> Dict[str, Any]:
+        '''Rewrite the original user question.
+
+        Parameters
+        ----------
+        state : ChatbotMessagesState
+            The current state of the chatbot messages.
+
+        Returns
+        -------
+        Dict[str, Any]
+            The updated state with the rewritten question appended to messages.
+        '''
+        system_prompt = (
+            "Look at the input and try to reason about the underlying semantic intent / meaning.\n"
+            "Here is the initial question:"
+            "\n ------- \n"
+            "- {question}"
+            "\n ------- \n"
+            "Here there are the previous messages of the user:"
+            "\n ------- \n"
+            "- {previous_messages}"
+            "\n ------- \n"
+            "Formulate an improved question:"
+        )
+        messages = state["messages"]
+        question = messages[1].content
+        previous_messages_positions = state["human_msg_positions"]
+        previous_messages = "\n- ".join([str(messages[i].content)
+                                        for i in previous_messages_positions])
+        prompt = system_prompt.format(
+            question=question, previous_messages=previous_messages)
+        response = self.llm.invoke([{"role": "user", "content": prompt}])
+        return {"messages": [{"role": "user", "content": response.content}]}
+
+    def _generate_query_or_respond(self, state: ChatbotMessagesState) -> Dict[str, Any]:
+        '''Call the model to generate a response based on the current state. Given
+        the question, it will decide to retrieve using the retriever tool, or simply respond to the user.
+
+        Parameters
+        ----------
+        state : ChatbotMessagesState
+            The current state of the chatbot messages.
+
+        Returns
+        -------
+        Dict[str, Any]
+            The updated state with the generated response appended to messages.
+        '''
+        response = (
+            self.llm
+            .bind_tools([self.retriever_tool]).invoke(state["messages"])
+        )
+        return {"messages": [response]}
+
+    def _grade_documents(self, state: ChatbotMessagesState) -> Literal["generate_answer", "rewrite_question"]:
+        '''Determine whether the retrieved documents are relevant to the question.
+
+        Parameters
+        ----------
+        state : ChatbotMessagesState
+            The current state of the chatbot messages.
+
+        Returns
+        -------
+        Literal["generate_answer", "rewrite_question"]
+            The next action to take based on the relevance of the documents.
+        '''
+        system_prompt = (
+            "You are a grader assessing relevance of a retrieved document to a user question. \n "
+            "Here is the retrieved document: \n\n {context} \n\n"
+            "Here is the user question: {question} \n"
+            "If the document contains keyword(s) or semantic meaning related to the user question, grade it as relevant. \n"
+            "Give a binary score 'yes' or 'no' score to indicate whether the document is relevant to the question."
+        )
+
+        question = state["messages"][0].content
+        context = state["messages"][-1].content
+
+        prompt = system_prompt.format(question=question, context=context)
+        response = (
+            self.grader_model.invoke(
+                [{"role": "user", "content": prompt}]
+            )
+        )
+        score = response.binary_score   # type: ignore
+
+        if score == "yes":
+            return "generate_answer"
+        else:
+            return "rewrite_question"
+
+    def _generate_answer(self, state: ChatbotMessagesState) -> Dict[str, Any]:
+        '''Generate an answer based on the current state.
+
+        Parameters
+        ----------
+        state : ChatbotMessagesState
+            The current state of the chatbot messages.
+
+        Returns
+        -------
+        Dict[str, Any]
+            The updated state with the generated answer appended to messages.
+        '''
+        system_prompt = (
+            "You are an assistant for question-answering tasks. "
+            "Use the following pieces of retrieved context to answer the question. "
+            "If you don't know the answer, just say that you don't know. "
+            "Use three sentences maximum and keep the answer concise.\n"
+            "Question: {question} \n"
+            "Context: {context}"
+        )
+
+        question = state["messages"][1].content
+        context = state["messages"][-1].content
+        prompt = system_prompt.format(question=question, context=context)
+        response = self.llm.invoke([{"role": "user", "content": prompt}])
+        return {"messages": [response]}
+
+    def __call__(self, messages: list, human_msgs_position: list[int]) -> dict[str, Any] | Any:
+        response = self.app.invoke(
+            {"messages": messages, "human_msg_positions": human_msgs_position})
+        return response if response else {"messages": []}

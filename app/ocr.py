@@ -10,13 +10,54 @@ import zipfile
 import matplotlib.pyplot as plt
 from pdf2image import convert_from_bytes  # type: ignore
 from matplotlib.patches import Rectangle
-from utils.llm import OCR_LLM, ImageOut
+from streamlit.runtime.uploaded_file_manager import UploadedFile
+from utils.directories import *
+from utils.llm import OCR_LLM, ImageOut, ChromaConfig, ChromaVectorStore
 from PIL import Image
 
-tmp_dir: str = "/ScribaLLM/tmp"
-tmp_file_path: str = os.path.join(tmp_dir, "uploaded_file.pdf")
-tmp_jpg_dir: str = os.path.join(tmp_dir, "jpg")
-tmp_crop_dir: str = os.path.join(tmp_dir, "cropped")
+
+def get_metadata(uploaded_file: UploadedFile, save: bool = False) -> dict:
+    '''Get metadata of the uploaded file.
+
+    Parameters
+    ----------
+    uploaded_file : UploadedFile
+        The uploaded file object.
+    save : bool, optional
+        Whether to save the metadata to a file, by default False
+
+    Returns
+    -------
+    dict
+        The metadata of the uploaded file.
+    '''
+    global tmp_dir
+    metadata = {
+        "name": uploaded_file.name,
+        "size": uploaded_file.size,
+        "file_id": uploaded_file.file_id
+    }
+    if save:
+        os.makedirs(tmp_dir, exist_ok=True)
+        with open(os.path.join(tmp_dir, f"metadata.json"), "w") as f:
+            json.dump(metadata, f)
+    return metadata
+
+
+def load_metadata() -> dict | None:
+    '''Load metadata from the metadata.json file.
+
+    Returns
+    -------
+    dict | None
+        The metadata of the uploaded file or None if the file does not exist.
+    '''
+    global tmp_dir
+    try:
+        with open(os.path.join(tmp_dir, f"metadata.json"), "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
 
 
 @st.cache_resource
@@ -367,6 +408,50 @@ def make_zip_file(text: str, list_images: list[ImageOut]) -> bytes:
     return zip_buffer.getvalue()
 
 
+def add_results_to_database(results: str) -> None:
+    '''Adds the OCR results to the database and update embeddings database.
+
+    Parameters
+    ----------
+    results : str
+        The OCR results to add to the database.
+    '''
+    global database_data_dir, tmp_dir
+
+    if not os.path.exists(database_data_dir):
+        os.makedirs(database_data_dir)
+
+    with open(os.path.join(tmp_dir, "metadata.json"), "r") as f:
+        metadata = json.load(f)
+
+    filename = os.path.splitext(metadata['name'])[0]
+    file_path = os.path.join(database_data_dir, f"{filename}.md")
+
+    with open(file_path, "w") as f:
+        f.write(results)
+
+    config = ChromaConfig(
+        chroma_path=chroma_filepath,
+        data_path=database_data_dir,
+        chunk_size=1000,
+        chunk_overlap=200,
+        collection_name="rag_documents",
+        file_pattern="*.md",
+        embedding_model="text-embedding-3-small",
+        batch_size=64,
+        force_rebuild=False
+    )
+
+    vector_store = ChromaVectorStore(config, st.session_state.openai_api_key)
+    vector_store.generate_data_store()
+
+    stats = vector_store.get_database_stats()
+    stats_log = "\n".join(
+        f"{key.replace('_', ' ').title()}: {value}" for key, value in stats.items())
+    logging.info(f"Database Stats:\n{stats_log}")
+    st.success(f"Results added to database: {file_path}\nMemory updated.")
+
+
 # ================ Page display ================
 st.write('# OCR 📝')
 
@@ -376,8 +461,12 @@ uploaded_file_name = uploaded_file.name if uploaded_file else None
 
 if 'page_index' not in st.session_state:
     st.session_state.page_index = 0
+if 'uploaded_file_metadata' not in st.session_state:
+    st.session_state.uploaded_file_metadata = {}
 
 if uploaded_file is not None and ('uploaded_filename' not in st.session_state or st.session_state.uploaded_filename != uploaded_file_name):
+    st.session_state.uploaded_file_metadata = get_metadata(
+        uploaded_file, save=True)
     st.session_state["uploaded_filename"] = uploaded_file.name
     st.session_state.page_index = 0
 
@@ -395,6 +484,8 @@ if uploaded_file is not None and ('uploaded_filename' not in st.session_state or
         page.save(jpg_path, "JPEG")
 
     st.success(f"File uploaded. Sending to backend...")
+else:
+    st.session_state.uploaded_file_metadata = load_metadata()
 
 st.write('## Layout Detection')
 
@@ -499,10 +590,28 @@ else:
     if isinstance(st.session_state.ocr_output, str):
         st.markdown(convert_markdown_images_to_base64(
             st.session_state.ocr_output, clear=False), unsafe_allow_html=True)
+
         st.download_button(
-            label="Download",
+            label="📥 Download",
             data=make_zip_file(st.session_state.ocr_output,
                                st.session_state.ocr_output_pictures_list),
             file_name="output.zip",
-            mime="application/zip"
+            mime="application/zip",
+            help="Click to download the OCR results as a ZIP file."
         )
+
+        _filename_md = os.path.splitext(st.session_state.uploaded_file_metadata['name'])[0]     # type: ignore
+        _file_path = os.path.join(database_data_dir, f"{_filename_md}.md")
+
+        if os.path.exists(_file_path):
+            if st.button(
+                label="📝 Overwrite memory",
+                help="Click to overwrite the chatbot memory about this file."
+            ):
+                add_results_to_database(st.session_state.ocr_output)
+        else:
+            if st.button(
+                label="🧠 Add to memory",
+                help="Click to add this file to the chatbot memory."
+            ):
+                add_results_to_database(st.session_state.ocr_output)

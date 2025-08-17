@@ -7,6 +7,12 @@ streamlit-feedback
 pandas
 pdf2image
 langchain-core
-langchain[google-genai]
-langchain[openai]
+langchain-google-genai
+langchain-openai
+langchain-community
+langchain-chroma
 langgraph
+chromadb
+unstructured
+unstructured[md]
+python-magic

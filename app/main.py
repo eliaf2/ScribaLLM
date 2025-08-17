@@ -3,6 +3,8 @@ import logging
 from utils.logging import setup_logging
 
 setup_logging(logging.DEBUG)
+
+st.set_page_config(page_title="ScribaLLM", page_icon="utils/icon.png")
 settings_page = st.Page('settings.py', title='Settings', icon='⚙️')
 ocr_page = st.Page('ocr.py', title='OCR', icon='📝')
 chatbot_page = st.Page('chatbot.py', title='Chatbot', icon='💬')

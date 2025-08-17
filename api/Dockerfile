@@ -5,11 +5,11 @@ WORKDIR /api
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
-    software-properties-common \
     git \
     poppler-utils \
     wget \
-    libgl1-mesa-glx \
+    libgl1-mesa-dri \
+    libgl1 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 

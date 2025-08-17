@@ -6,9 +6,9 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
-    software-properties-common \
     git \
     poppler-utils \
+    libmagic-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY config/requirements.txt .
@@ -17,7 +17,8 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 RUN mkdir -p /ScribaLLM/logs && \
     touch /ScribaLLM/logs/ocr.log && \
     touch /ScribaLLM/logs/chatbot.log && \
-    touch /ScribaLLM/logs/main.log
+    touch /ScribaLLM/logs/main.log  && \
+    export ANONYMIZED_TELEMETRY=False
 
 COPY . .
 RUN mkdir -p /root/.streamlit && cp -r config/.streamlit/* /root/.streamlit/
