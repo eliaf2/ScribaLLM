@@ -445,6 +445,19 @@ def add_results_to_database(results: str) -> None:
     logging.info(f"Database Stats:\n{stats_log}")
     st.success(f"Results added to database: {file_path}\nMemory updated.")
 
+def check_api() -> bool:
+    '''Checks if Gemini or OpenAI API key are loaded.
+
+    Returns
+    -------
+    bool
+        True if at least one API key is valid, False otherwise.
+    '''
+
+    if "gemini_api_key" not in st.session_state or "openai_api_key" not in st.session_state:
+        return False
+    
+    return True
 
 # ================ Page display ================
 st.write('# OCR 📝')
@@ -557,7 +570,7 @@ else:
 if "ocr_output" not in st.session_state:
     st.session_state.ocr_output = []
 
-if st.button("Convert to Text"):
+if st.button("Convert to Text") and check_api():
     save_cropped_images()
     st.session_state.ocr_output, llm = ocr_llm()
 
@@ -576,6 +589,8 @@ if st.button("Convert to Text"):
     st.session_state.ocr_output = fix_url_pictures(st.session_state.ocr_output)
     logging.debug("OCR conversion completed.")
     logging.debug(f"OCR results: {st.session_state.ocr_output}")
+elif not check_api():
+    st.error("Please provide a valid Gemini or OpenAI API key.")
 
 st.write("### OCR Results")
 if st.session_state.ocr_output == []:

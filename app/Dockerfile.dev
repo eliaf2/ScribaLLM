@@ -11,25 +11,21 @@ RUN apt-get update && apt-get install -y \
     libmagic-dev \
     && rm -rf /var/lib/apt/lists/*
 
-ARG GITHUB_REPO
-ARG GITHUB_BRANCH=main
-RUN git clone --depth 1 --branch ${GITHUB_BRANCH} https://github.com/${GITHUB_REPO}.git /tmp/repo && \
-    cp -r /tmp/repo/app/* /app/ && \
-    rm -rf /tmp/repo
-
-RUN pip3 install --no-cache-dir -r config/requirements.txt
+COPY config/requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 RUN mkdir -p /ScribaLLM/logs && \
     touch /ScribaLLM/logs/ocr.log && \
     touch /ScribaLLM/logs/chatbot.log && \
-    touch /ScribaLLM/logs/main.log && \
+    touch /ScribaLLM/logs/main.log  && \
     export ANONYMIZED_TELEMETRY=False
 
-RUN mkdir -p /root/.streamlit && cp -r config/.streamlit/* /root/.streamlit/
+COPY . .
+RUN mkdir -p /root/.streamlit && cp -r config/.streamlit.dev/* /root/.streamlit/
 RUN mkdir -p /ScribaLLM/tmp && cp -r config/tmp/* /ScribaLLM/tmp/
 
 EXPOSE 8501
 
 HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health || exit 1
 
-ENTRYPOINT ["sh", "-c", "streamlit run main.py --server.port=8501 --server.address=0.0.0.0"]
+ENTRYPOINT ["sh", "-c", "DEVELOPER_MODE=true streamlit run main.py --server.port=8501 --server.address=0.0.0.0"]

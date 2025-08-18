@@ -4,7 +4,7 @@
 # "info", or "debug".
 #
 # Default: "info"
-level = "info"
+level = "debug"
 #
 # Default: "%(asctime)s %(message)s"
 messageFormat = "%(asctime)s %(message)s"
@@ -15,12 +15,12 @@ messageFormat = "%(asctime)s %(message)s"
 # Controls whether uncaught app exceptions and deprecation warnings
 # are displayed in the browser. This can be one of the following:
 #
-showErrorDetails = "type"
+showErrorDetails = "full"
 
 # Change the visibility of items in the toolbar, options menu,
 # and settings dialog (top right of the app).
 #
-toolbarMode = "minimal"
+toolbarMode = "developer"
 
 # Controls whether to display the default sidebar page navigation in a
 # multi-page app. This only applies when app's pages are defined by the

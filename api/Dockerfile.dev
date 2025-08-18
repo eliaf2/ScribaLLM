@@ -16,13 +16,10 @@ RUN apt-get update && apt-get install -y \
 # Check that libGL.so.1 is found
 RUN ldconfig -p | grep libGL.so.1 || echo "libGL.so.1 not found"
 
-ARG GITHUB_REPO
-ARG GITHUB_BRANCH=main
-RUN git clone --depth 1 --branch ${GITHUB_BRANCH} https://github.com/${GITHUB_REPO}.git /tmp/repo && \
-    cp -r /tmp/repo/api/* /api/ && \
-    rm -rf /tmp/repo
+COPY config/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN pip install --no-cache-dir -r config/requirements.txt
+COPY . .
 
 RUN mkdir -p /models && \
     wget -O /models/doclayout_yolo_docstructbench_imgsz1024.pt https://huggingface.co/juliozhao/DocLayout-YOLO-DocStructBench/resolve/main/doclayout_yolo_docstructbench_imgsz1024.pt

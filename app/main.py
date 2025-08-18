@@ -1,16 +1,24 @@
 import streamlit as st
 import logging
+import os
 from utils.logging import setup_logging
 
+developer_mode = os.getenv("DEVELOPER_MODE", "false").lower() == "true"
 setup_logging(logging.DEBUG)
 
-st.set_page_config(page_title="ScribaLLM", page_icon="utils/icon.png")
+st.set_page_config(page_title="ScribaLLM", page_icon="utils/icon.png",
+                   layout="centered", initial_sidebar_state="expanded")
 settings_page = st.Page('settings.py', title='Settings', icon='⚙️')
 ocr_page = st.Page('ocr.py', title='OCR', icon='📝')
 chatbot_page = st.Page('chatbot.py', title='Chatbot', icon='💬')
 manage_memory_page = st.Page('database.py', title='Manage Memory', icon='📊')
-debug_page = st.Page('utils/debug_page.py', title='Debug', icon='👨‍💻')
 
-pg = st.navigation([chatbot_page, ocr_page, settings_page, manage_memory_page, debug_page])
+if developer_mode:
+    debug_page = st.Page('utils/debug_page.py', title='Debug', icon='👨‍💻')
+    pg = st.navigation(
+        [ocr_page, chatbot_page, manage_memory_page, settings_page, debug_page])
+else:
+    pg = st.navigation(
+        [ocr_page, chatbot_page, manage_memory_page, settings_page])
 
 pg.run()
