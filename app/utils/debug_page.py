@@ -1,5 +1,6 @@
 import streamlit as st
 import io
+import pandas as pd
 
 st.set_page_config(page_title="Debug Page", layout="wide")
 
@@ -43,3 +44,18 @@ except FileNotFoundError:
     st.warning(f"Log file not found at {ocr_log}")
 except Exception as e:
     st.error(f"Error reading log file: {e}")
+
+st.write("## Session State Keys")
+if st.session_state:
+    session_state_df = pd.DataFrame(
+        [
+            {
+                "Key": key,
+                "Value": (str(value)[:100] + "...") if len(str(value)) > 100 else str(value),
+            }
+            for key, value in st.session_state.items()
+        ]
+    )
+    st.table(session_state_df)
+else:
+    st.write("No session state keys available.")

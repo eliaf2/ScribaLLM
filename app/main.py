@@ -8,8 +8,9 @@ st.set_page_config(page_title="ScribaLLM", page_icon="utils/icon.png")
 settings_page = st.Page('settings.py', title='Settings', icon='⚙️')
 ocr_page = st.Page('ocr.py', title='OCR', icon='📝')
 chatbot_page = st.Page('chatbot.py', title='Chatbot', icon='💬')
+manage_memory_page = st.Page('database.py', title='Manage Memory', icon='📊')
 debug_page = st.Page('utils/debug_page.py', title='Debug', icon='👨‍💻')
 
-pg = st.navigation([chatbot_page, ocr_page, settings_page, debug_page])
+pg = st.navigation([chatbot_page, ocr_page, settings_page, manage_memory_page, debug_page])
 
 pg.run()

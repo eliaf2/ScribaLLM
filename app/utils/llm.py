@@ -20,6 +20,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
+import pandas as pd
 from langchain.tools.retriever import create_retriever_tool
 from langgraph.prebuilt import ToolNode, tools_condition
 
@@ -53,14 +54,14 @@ class AgentState(TypedDict):
 
 
 class OCR_LLM:
-    # gemini_llm_model = 'gemini-1.5-flash'
-    gemini_llm_model = 'gemini-2.0-flash'
-    openai_llm_model = 'gpt-4.1-nano'
+    
     temperature = 0.2
 
-    def __init__(self, openai_api_key: SecretStr, gemini_api_key: SecretStr, context: str = ''):
+    def __init__(self, openai_api_key: SecretStr, openai_llm_model: str, gemini_api_key: SecretStr, gemini_llm_model: str, context: str = ''):
         self.openai_api_key = openai_api_key
+        self.openai_llm_model = openai_llm_model
         self.gemini_api_key = gemini_api_key
+        self.gemini_llm_model = gemini_llm_model
         self.context = context if context else "converting written text to digital format"
 
         if not self.openai_api_key and not self.gemini_api_key:
@@ -807,6 +808,316 @@ class ChromaVectorStore:
             logging.error(f"Vector database generation failed: {e}")
             raise
 
+    def list_documents(self) -> pd.DataFrame:
+        '''List all documents in the database and return as a pandas DataFrame.
+
+        Returns
+        -------
+        pd.DataFrame
+            A DataFrame containing information about all documents in the database.
+            Columns include: document_id, source, filename, chunk_id, chunk_size, 
+            total_chunks, content_preview, and any other metadata.
+        '''
+        try:
+            if not os.path.exists(self.config.chroma_path):
+                logging.warning("Database not found")
+                return pd.DataFrame()
+
+            if not self.embeddings:
+                self._initialize_embeddings()
+
+            db = Chroma(
+                persist_directory=self.config.chroma_path,
+                embedding_function=self.embeddings,
+                collection_name=self.config.collection_name
+            )
+
+            # Get all documents from the collection
+            collection = db._collection
+            results = collection.get()
+
+            if not results['documents']:
+                logging.info("No documents found in the database")
+                return pd.DataFrame()
+
+            # Prepare data for DataFrame
+            data = []
+            for i, (doc_id, document, metadata) in enumerate(zip(   # type: ignore
+                results['ids'],
+                results['documents'],
+                results['metadatas']    # type: ignore
+            )):
+                row = {
+                    'document_id': doc_id,
+                    'content': document,
+                    'content_preview': document[:200] + '...' if len(document) > 200 else document,
+                    'content_length': len(document),
+                }
+
+                # Add all metadata fields
+                if metadata:
+                    row.update(metadata)
+
+                data.append(row)
+
+            df = pd.DataFrame(data)
+
+            # Reorder columns
+            priority_columns = ['document_id', 'source', 'filename', 'chunk_id',
+                                'chunk_size', 'total_chunks', 'content_preview', 'content_length']
+
+            # Get existing columns in priority order, then add remaining columns
+            existing_priority_cols = [
+                col for col in priority_columns if col in df.columns]
+            remaining_cols = [
+                col for col in df.columns if col not in priority_columns]
+
+            if existing_priority_cols:
+                df = df[existing_priority_cols + remaining_cols]
+
+            logging.info(f"Retrieved {len(df)} documents from the database")
+            return df
+
+        except Exception as e:
+            logging.error(f"Failed to list documents: {e}")
+            return pd.DataFrame()
+
+    def remove_documents_by_source(self, source_path: str) -> Dict[str, Any]:
+        '''Remove all embeddings for documents from a specific source file.
+
+        Parameters
+        ----------
+        source_path : str
+            The source path/filename to remove from the database.
+
+        Returns
+        -------
+        Dict[str, Any]
+            A dictionary containing information about the removal operation,
+            including the number of documents removed and operation status.
+        '''
+        try:
+            if not os.path.exists(self.config.chroma_path):
+                return {
+                    "status": "error",
+                    "message": "Database not found",
+                    "documents_removed": 0
+                }
+
+            if not self.embeddings:
+                self._initialize_embeddings()
+
+            db = Chroma(
+                persist_directory=self.config.chroma_path,
+                embedding_function=self.embeddings,
+                collection_name=self.config.collection_name
+            )
+
+            collection = db._collection
+
+            results = collection.get()
+
+            if not results['documents']:
+                return {
+                    "status": "success",
+                    "message": "No documents found in database",
+                    "documents_removed": 0
+                }
+
+            # Find document IDs that match the source
+            matching_ids = []
+            for doc_id, metadata in zip(results['ids'], results['metadatas']):  # type: ignore
+                if metadata and metadata.get('source') == source_path:
+                    matching_ids.append(doc_id)
+
+            if not matching_ids:
+                return {
+                    "status": "success",
+                    "message": f"No documents found with source: {source_path}",
+                    "documents_removed": 0,
+                    "available_sources": list(set(
+                        metadata.get('source', 'unknown')
+                        for metadata in results['metadatas']    # type: ignore
+                        if metadata
+                    ))
+                }
+
+            collection.delete(ids=matching_ids)
+
+            # Update metadata file to remove the source
+            metadata = self._load_existing_metadata()
+            if source_path in metadata.get("documents", {}):
+                del metadata["documents"][source_path]
+                self._save_metadata(metadata)
+            
+
+            logging.info(
+                f"Removed {len(matching_ids)} documents from source: {source_path}")
+            
+            # Delete the source file from disk
+            try:
+                if os.path.exists(source_path):
+                    os.remove(source_path)
+                    logging.info(f"Deleted source file: {source_path}")
+                else:
+                    logging.warning(f"Source file not found: {source_path}")
+            except Exception as e:
+                logging.error(f"Failed to delete source file {source_path}: {e}")
+
+            return {
+                "status": "success",
+                "message": f"Successfully removed documents from source: {source_path}",
+                "documents_removed": len(matching_ids),
+                "removed_document_ids": matching_ids
+            }
+
+        except Exception as e:
+            error_msg = f"Failed to remove documents from source {source_path}: {e}"
+            logging.error(error_msg)
+            return {
+                "status": "error",
+                "message": error_msg,
+                "documents_removed": 0
+            }
+
+    def get_source_statistics(self) -> pd.DataFrame:
+        '''Get aggregated statistics for each source file in the database.
+        
+        Returns
+        -------
+        pd.DataFrame
+            A DataFrame containing statistics aggregated by source file.
+            Columns include: source, filename, total_chunks, total_content_length,
+            avg_chunk_size, min_chunk_size, max_chunk_size, first_chunk_id, last_chunk_id.
+        '''
+        try:
+            if not os.path.exists(self.config.chroma_path):
+                logging.warning("Database not found")
+                return pd.DataFrame()
+            
+            if not self.embeddings:
+                self._initialize_embeddings()
+            
+            db = Chroma(
+                persist_directory=self.config.chroma_path,
+                embedding_function=self.embeddings,
+                collection_name=self.config.collection_name
+            )
+            
+            # Get all documents from the collection
+            collection = db._collection
+            results = collection.get()
+            
+            if not results['documents']:
+                logging.info("No documents found in the database")
+                return pd.DataFrame()
+            
+            # Group data by source
+            source_data = {}
+            
+            for doc_id, document, metadata in zip(
+                results['ids'], 
+                results['documents'], 
+                results['metadatas']    # type: ignore
+            ):
+                if not metadata or 'source' not in metadata:
+                    continue
+                    
+                source = metadata['source']
+                
+                if source not in source_data:
+                    source_data[source] = {
+                        'documents': [],
+                        'chunk_sizes': [],
+                        'chunk_ids': [],
+                        'metadata': metadata
+                    }
+                
+                source_data[source]['documents'].append({
+                    'id': doc_id,
+                    'content': document,
+                    'content_length': len(document),
+                    'metadata': metadata
+                })
+                
+                chunk_size = metadata.get('chunk_size', len(document))
+                source_data[source]['chunk_sizes'].append(chunk_size)
+                
+                chunk_id = metadata.get('chunk_id', 0)
+                source_data[source]['chunk_ids'].append(chunk_id)
+            
+            # Calculate statistics for each source
+            stats_data = []
+            
+            for source, data in source_data.items():
+                documents = data['documents']
+                chunk_sizes = data['chunk_sizes']
+                chunk_ids = data['chunk_ids']
+                sample_metadata = data['metadata']
+                
+                # Extract filename from source path
+                filename = os.path.basename(source) if source else 'unknown'
+                
+                # Calculate statistics
+                total_chunks = len(documents)
+                total_content_length = sum(doc['content_length'] for doc in documents)
+                avg_chunk_size = sum(chunk_sizes) / len(chunk_sizes) if chunk_sizes else 0
+                min_chunk_size = min(chunk_sizes) if chunk_sizes else 0
+                max_chunk_size = max(chunk_sizes) if chunk_sizes else 0
+                min_chunk_id = min(chunk_ids) if chunk_ids else 0
+                max_chunk_id = max(chunk_ids) if chunk_ids else 0
+                
+                # Get total chunks from metadata (if available)
+                total_chunks_in_source = sample_metadata.get('total_chunks', total_chunks)
+                
+                # Calculate additional metrics
+                avg_content_length = total_content_length / total_chunks if total_chunks > 0 else 0
+                
+                # Check if this source appears to be complete (all chunks present)
+                expected_chunk_ids = set(range(total_chunks_in_source)) if total_chunks_in_source else set()
+                actual_chunk_ids = set(chunk_ids)
+                is_complete = expected_chunk_ids.issubset(actual_chunk_ids) if expected_chunk_ids else True
+                missing_chunks = len(expected_chunk_ids - actual_chunk_ids) if expected_chunk_ids else 0
+                
+                stats_row = {
+                    'source': source,
+                    'filename': filename,
+                    'total_chunks': total_chunks,
+                    'total_chunks_expected': total_chunks_in_source,
+                    'missing_chunks': missing_chunks,
+                    'is_complete': is_complete,
+                    'total_content_length': total_content_length,
+                    'avg_content_length': round(avg_content_length, 2),
+                    'avg_chunk_size': round(avg_chunk_size, 2),
+                    'min_chunk_size': min_chunk_size,
+                    'max_chunk_size': max_chunk_size,
+                    'chunk_id_range': f"{min_chunk_id}-{max_chunk_id}",
+                    'first_chunk_id': min_chunk_id,
+                    'last_chunk_id': max_chunk_id,
+                }
+                
+                # Add any additional metadata that might be useful
+                for key in ['filename', 'source']:
+                    if key in sample_metadata and key not in stats_row:
+                        stats_row[f'metadata_{key}'] = sample_metadata[key]
+                
+                stats_data.append(stats_row)
+            
+            # Create DataFrame
+            df = pd.DataFrame(stats_data)
+            
+            # Sort by source name for consistent ordering
+            if not df.empty:
+                df = df.sort_values('source').reset_index(drop=True)
+            
+            logging.info(f"Generated statistics for {len(df)} sources")
+            return df
+            
+        except Exception as e:
+            logging.error(f"Failed to get source statistics: {e}")
+            return pd.DataFrame()
+
+
 # =======================================
 
 
@@ -821,17 +1132,17 @@ class GradeDocuments(BaseModel):
 
 
 class ChatbotLLM:
-    openai_llm_model = 'gpt-4.1-nano'
-    openai_llm_model_grader = 'gpt-4.1-nano'
+    
     temperature = 1.0
 
-    def __init__(self, openai_api_key: SecretStr, chroma_config: ChromaConfig):
+    def __init__(self, openai_api_key: SecretStr, openai_llm_model: str, chroma_config: ChromaConfig):
         self.openai_api_key = openai_api_key
+        self.openai_llm_model = openai_llm_model
         self.chroma_config = chroma_config
 
         self.llm = init_chat_model(model=self.openai_llm_model, model_provider="openai",
                                    api_key=self.openai_api_key, temperature=self.temperature)
-        self.grader_model = init_chat_model(model=self.openai_llm_model_grader, model_provider="openai",
+        self.grader_model = init_chat_model(model=self.openai_llm_model, model_provider="openai",
                                             api_key=self.openai_api_key, temperature=0.0)
         self.grader_model = self.grader_model.with_structured_output(
             GradeDocuments)

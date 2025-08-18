@@ -11,8 +11,8 @@ import matplotlib.pyplot as plt
 from pdf2image import convert_from_bytes  # type: ignore
 from matplotlib.patches import Rectangle
 from streamlit.runtime.uploaded_file_manager import UploadedFile
-from utils.directories import *
-from utils.llm import OCR_LLM, ImageOut, ChromaConfig, ChromaVectorStore
+from utils.globalVariables import *
+from utils.llm import OCR_LLM, ImageOut, ChromaVectorStore
 from PIL import Image
 
 
@@ -133,10 +133,15 @@ def ocr_llm() -> tuple[list[str] | None, OCR_LLM]:
         A tuple containing a list of OCR results in markdown format or None if no text is detected, and the OCR_LLM instance used for processing.
     '''
     openai_api_key = st.session_state.openai_api_key
+    openai_llm_model = st.session_state.openai_llm_model
     gemini_api_key = st.session_state.gemini_api_key
+    gemini_llm_model = st.session_state.gemini_llm_model
 
     ocr = OCR_LLM(openai_api_key=openai_api_key,
-                  gemini_api_key=gemini_api_key, context=st.session_state.context)
+                  openai_llm_model=openai_llm_model,
+                  gemini_api_key=gemini_api_key, 
+                  gemini_llm_model=gemini_llm_model,
+                  context=st.session_state.context)
     ocr_results = list()
     for page_folder in sorted(os.listdir(tmp_crop_dir)):
         cropped_images_path = os.path.join(tmp_crop_dir, page_folder)
@@ -430,19 +435,8 @@ def add_results_to_database(results: str) -> None:
     with open(file_path, "w") as f:
         f.write(results)
 
-    config = ChromaConfig(
-        chroma_path=chroma_filepath,
-        data_path=database_data_dir,
-        chunk_size=1000,
-        chunk_overlap=200,
-        collection_name="rag_documents",
-        file_pattern="*.md",
-        embedding_model="text-embedding-3-small",
-        batch_size=64,
-        force_rebuild=False
-    )
-
-    vector_store = ChromaVectorStore(config, st.session_state.openai_api_key)
+    vector_store = ChromaVectorStore(
+        my_chroma_config, st.session_state.openai_api_key)
     vector_store.generate_data_store()
 
     stats = vector_store.get_database_stats()
