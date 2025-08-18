@@ -22,4 +22,4 @@ if st.button("Remove"):
     st.success(f"Source '{source_to_remove}' removed successfully.")
 
     st.session_state.memory_vector_store = ChromaVectorStore(my_chroma_config, st.session_state.openai_api_key)
-    st.rerun(scope="fragment")
+    st.rerun()
