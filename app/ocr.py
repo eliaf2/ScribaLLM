@@ -109,18 +109,18 @@ def filter_detection(detections: list, types: list[str] = []) -> list:
     '''
     if not types:
         return [json.loads(det) if isinstance(det, str) else det for det in detections]
-    filter_detection = []
+    filter_detection_list = []
     for page in range(len(detections)):
-        page_filter_detection = []
+        page_filter_detection_list = []
         page_detection = json.loads(detections[page]) if isinstance(
             detections[page], str) else detections[page]
         for det in page_detection:
             if det["name"] in types:
-                page_filter_detection.append(det)
+                page_filter_detection_list.append(det)
 
-        filter_detection.append(page_filter_detection)
+        filter_detection_list.append(page_filter_detection_list)
 
-    return filter_detection if filter_detection else []
+    return filter_detection_list if filter_detection_list else []
 
 
 # @st.cache_resource
