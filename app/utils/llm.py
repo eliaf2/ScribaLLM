@@ -4,7 +4,6 @@ from typing import TypedDict, Literal, List, Dict, Any
 from pydantic import BaseModel, Field, SecretStr
 from langgraph.graph import StateGraph, END, MessagesState
 import base64
-from dataclasses import dataclass
 from PIL import Image
 from io import BytesIO
 import os
@@ -413,8 +412,7 @@ class OCR_LLM:
 # =======================================
 
 
-@dataclass
-class ChromaConfig:
+class ChromaConfig(BaseModel):
     chroma_path: str = "chroma"
     data_path: str = "data"
     chunk_size: int = 1000
