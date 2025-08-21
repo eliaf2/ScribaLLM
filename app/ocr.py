@@ -437,7 +437,7 @@ def add_results_to_database(results: str) -> None:
 
     vector_store = ChromaVectorStore(
         my_chroma_config, st.session_state.openai_api_key)
-    vector_store.generate_data_store()
+    vector_store.save_to_chroma()
 
     stats = vector_store.get_database_stats()
     stats_log = "\n".join(

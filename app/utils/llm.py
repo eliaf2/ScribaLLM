@@ -506,7 +506,7 @@ class ChromaVectorStore:
         return hashlib.md5((combined_content + combined_metadata).encode('utf-8')).hexdigest()
 
     def load_documents(self) -> List[Document]:
-        '''Load documents from the specified directory with comprehensive error handling.
+        '''Load documents from the specified directory.
 
         Returns
         -------
@@ -542,7 +542,7 @@ class ChromaVectorStore:
             raise
 
     def split_documents(self, documents: List[Document]) -> List[Document]:
-        '''Split documents into chunks with optimized parameters.
+        '''Split documents into chunks.
 
         Parameters
         ----------
@@ -574,13 +574,6 @@ class ChromaVectorStore:
 
             logging.info(
                 f"Split {len(documents)} documents into {len(chunks)} chunks")
-
-            if chunks:
-                sample_chunk = chunks[min(10, len(chunks) - 1)]
-                logging.debug(
-                    f"Sample chunk content: {sample_chunk.page_content[:200]}...")
-                logging.debug(
-                    f"Sample chunk metadata: {sample_chunk.metadata}")
 
             return chunks
 
@@ -644,7 +637,7 @@ class ChromaVectorStore:
         return needs_update, new_documents
 
     def _process_chunks_in_batches(self, chunks: List[Document]) -> None:
-        '''Process chunks in batches for better memory management.
+        '''Process chunks in batches.
 
         Parameters
         ----------
@@ -676,15 +669,53 @@ class ChromaVectorStore:
                 logging.error(f"Failed to process batch {batch_num}: {e}")
                 raise
 
-    def save_to_chroma(self, chunks: List[Document]) -> None:
-        '''Save chunks to Chroma with incremental update support and batch processing.
+    def get_database_stats(self) -> Dict[str, Any]:
+        '''Get statistics about the current database.
 
-        Parameters
-        ----------
-        chunks : List[Document]
-            A list of Document objects to be saved to Chroma.
+        Returns
+        -------
+        Dict[str, Any]
+            A dictionary containing database statistics.
         '''
         try:
+            if not os.path.exists(self.config.chroma_path):
+                return {"status": "Database not found"}
+
+            if not self.embeddings:
+                self._initialize_embeddings()
+
+            db = Chroma(
+                persist_directory=self.config.chroma_path,
+                embedding_function=self.embeddings,
+                collection_name=self.config.collection_name
+            )
+
+            collection = db._collection
+            stats = {
+                "status": "Active",
+                "total_embeddings": collection.count(),
+                "database_path": self.config.chroma_path,
+                "collection_name": self.config.collection_name,
+                "embedding_model": self.config.embedding_model
+            }
+
+            if self.metadata_file.exists():
+                metadata = self._load_existing_metadata()
+                stats["last_updated"] = metadata.get("last_updated")
+                stats["tracked_documents"] = len(metadata.get("documents", {}))
+
+            return stats
+
+        except Exception as e:
+            logging.error(f"Failed to get database stats: {e}")
+            return {"status": "Error", "error": str(e)}
+
+    def save_to_chroma(self) -> None:
+        '''Update the Chroma database with new or changed documents.
+        '''
+        try:
+            logging.info("Starting vector database generation")
+
             if not self.embeddings:
                 self._initialize_embeddings()
 
@@ -693,6 +724,8 @@ class ChromaVectorStore:
 
             if not needs_update and not self.config.force_rebuild:
                 logging.info("Vector database is up to date.")
+                stats = self.get_database_stats()
+                logging.info(f"Current database stats: {stats}")
                 return
 
             if self.config.force_rebuild and os.path.exists(self.config.chroma_path):
@@ -731,157 +764,17 @@ class ChromaVectorStore:
 
                 logging.info(
                     f"Successfully saved {len(chunks_to_process)} chunks to {self.config.chroma_path}.")
+                
+                stats = self.get_database_stats()
+                logging.info(f"Database generation completed. Stats: {stats}")
 
         except Exception as e:
             logging.error(f"Failed to save to Chroma: {e}")
             raise
 
-    def get_database_stats(self) -> Dict[str, Any]:
-        '''Get statistics about the current database.
-
-        Returns
-        -------
-        Dict[str, Any]
-            A dictionary containing database statistics.
-        '''
-        try:
-            if not os.path.exists(self.config.chroma_path):
-                return {"status": "Database not found"}
-
-            if not self.embeddings:
-                self._initialize_embeddings()
-
-            db = Chroma(
-                persist_directory=self.config.chroma_path,
-                embedding_function=self.embeddings,
-                collection_name=self.config.collection_name
-            )
-
-            collection = db._collection
-            stats = {
-                "status": "Active",
-                "total_documents": collection.count(),
-                "database_path": self.config.chroma_path,
-                "collection_name": self.config.collection_name,
-                "embedding_model": self.config.embedding_model
-            }
-
-            if self.metadata_file.exists():
-                metadata = self._load_existing_metadata()
-                stats["last_updated"] = metadata.get("last_updated")
-                stats["tracked_documents"] = len(metadata.get("documents", {}))
-
-            return stats
-
-        except Exception as e:
-            logging.error(f"Failed to get database stats: {e}")
-            return {"status": "Error", "error": str(e)}
-
-    def generate_data_store(self) -> None:
-        '''Generate the vector data store from the loaded documents.
-        '''
-        try:
-            logging.info("Starting vector database generation")
-
-            documents = self.load_documents()
-
-            needs_update, _ = self._needs_update(documents)
-
-            if not needs_update and not self.config.force_rebuild:
-                logging.info(
-                    "No changes detected, database is already up to date.")
-                stats = self.get_database_stats()
-                logging.info(f"Current database stats: {stats}")
-                return
-
-            chunks = self.split_documents(documents)
-
-            self.save_to_chroma(chunks)
-
-            # Display final stats
-            stats = self.get_database_stats()
-            logging.info(f"Database generation completed. Stats: {stats}")
-
-        except Exception as e:
-            logging.error(f"Vector database generation failed: {e}")
-            raise
-
-    def list_documents(self) -> pd.DataFrame:
-        '''List all documents in the database and return as a pandas DataFrame.
-
-        Returns
-        -------
-        pd.DataFrame
-            A DataFrame containing information about all documents in the database.
-            Columns include: document_id, source, filename, chunk_id, chunk_size, 
-            total_chunks, content_preview, and any other metadata.
-        '''
-        try:
-            if not os.path.exists(self.config.chroma_path):
-                logging.warning("Database not found")
-                return pd.DataFrame()
-
-            if not self.embeddings:
-                self._initialize_embeddings()
-
-            db = Chroma(
-                persist_directory=self.config.chroma_path,
-                embedding_function=self.embeddings,
-                collection_name=self.config.collection_name
-            )
-
-            # Get all documents from the collection
-            collection = db._collection
-            results = collection.get()
-
-            if not results['documents']:
-                logging.info("No documents found in the database")
-                return pd.DataFrame()
-
-            # Prepare data for DataFrame
-            data = []
-            for i, (doc_id, document, metadata) in enumerate(zip(   # type: ignore
-                results['ids'],
-                results['documents'],
-                results['metadatas']    # type: ignore
-            )):
-                row = {
-                    'document_id': doc_id,
-                    'content': document,
-                    'content_preview': document[:200] + '...' if len(document) > 200 else document,
-                    'content_length': len(document),
-                }
-
-                # Add all metadata fields
-                if metadata:
-                    row.update(metadata)
-
-                data.append(row)
-
-            df = pd.DataFrame(data)
-
-            # Reorder columns
-            priority_columns = ['document_id', 'source', 'filename', 'chunk_id',
-                                'chunk_size', 'total_chunks', 'content_preview', 'content_length']
-
-            # Get existing columns in priority order, then add remaining columns
-            existing_priority_cols = [
-                col for col in priority_columns if col in df.columns]
-            remaining_cols = [
-                col for col in df.columns if col not in priority_columns]
-
-            if existing_priority_cols:
-                df = df[existing_priority_cols + remaining_cols]
-
-            logging.info(f"Retrieved {len(df)} documents from the database")
-            return df
-
-        except Exception as e:
-            logging.error(f"Failed to list documents: {e}")
-            return pd.DataFrame()
 
     def remove_documents_by_source(self, source_path: str) -> Dict[str, Any]:
-        '''Remove all embeddings for documents from a specific source file.
+        '''Remove all embeddings from a specific source file.
 
         Parameters
         ----------
