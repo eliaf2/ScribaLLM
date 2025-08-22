@@ -1,7 +1,6 @@
 import logging
 import os
-
-log_dir = "/ScribaLLM/logs"
+from utils.globalVariables import log_dir, log_path
 
 class ExcludeEventFilter(logging.Filter):
     def filter(self, record):
@@ -15,7 +14,6 @@ class ExcludeEventFilter(logging.Filter):
 
 def setup_logging(level=logging.INFO, console_logging=False):
     os.makedirs(log_dir, exist_ok=True)
-    log_file_path = os.path.join(log_dir, "main.log")
 
     logger = logging.getLogger()
     logger.setLevel(level)
@@ -23,7 +21,7 @@ def setup_logging(level=logging.INFO, console_logging=False):
     logger.handlers.clear()
 
     # Create file handler
-    file_handler = logging.FileHandler(log_file_path)
+    file_handler = logging.FileHandler(log_path)
     file_handler.setLevel(level)
     file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
     file_handler.addFilter(ExcludeEventFilter())

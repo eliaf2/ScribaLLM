@@ -1,6 +1,9 @@
 import os
 from utils.llm import ChromaConfig
 
+log_dir = "/ScribaLLM/logs"
+log_path = "/ScribaLLM/logs/main.log"
+
 tmp_dir: str = "/ScribaLLM/tmp"
 database_dir: str = "/ScribaLLM/database"
 

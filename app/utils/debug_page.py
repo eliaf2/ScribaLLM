@@ -1,20 +1,20 @@
 import streamlit as st
 import io
 import pandas as pd
+from utils.globalVariables import log_path
 
 st.set_page_config(page_title="Debug Page", layout="wide")
 
 st.title("Debug Page")
 
-ocr_log = "/ScribaLLM/logs/main.log"
 try:
-    with open(ocr_log, "r") as log_file:
+    with open(log_path, "r") as log_file:
         log_content = log_file.readlines()
 
     st.subheader("Log File Content")
     log_output = "".join(log_content)
 
-    # Display log content in a text area and scroll to the bottom by default - Must be FIXED
+    # Display log content in a text area and scroll to the bottom by default
     st.text_area("Log Output", log_output, height=400, key="log_output")
     st.markdown(
         """
@@ -28,9 +28,9 @@ try:
         unsafe_allow_html=True,
     )
     if st.button("Clean Log File"):
-        with open(ocr_log, "w") as log_file:
+        with open(log_path, "w") as log_file:
             log_file.write("")
-        st.success("Log file cleaned successfully!")
+        st.success("Log file cleaned successfully.")
 
 
     st.download_button(
@@ -41,7 +41,7 @@ try:
 
 
 except FileNotFoundError:
-    st.warning(f"Log file not found at {ocr_log}")
+    st.warning(f"Log file not found at {log_path}")
 except Exception as e:
     st.error(f"Error reading log file: {e}")
 
