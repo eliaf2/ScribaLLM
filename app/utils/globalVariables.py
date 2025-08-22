@@ -35,5 +35,5 @@ openai_model_options: dict = {
     "GPT 4.1 Mini": "gpt-4.1-mini"
 }
 
-avatar_icon_path: str = "utils/icon_page.svg"
+avatar_icon_path: str = "utils/icon_avatar.svg"
 page_icon_path: str = "utils/icon_page.svg"
