@@ -1,7 +1,7 @@
 import streamlit as st
 import logging
 import os
-from utils.globalVariables import my_chroma_config
+from utils.globalVariables import my_chroma_config, avatar_icon_path
 from utils.llm import ChromaConfig, ChatbotLLM
 from langchain_core.messages import ToolMessage
 
@@ -45,10 +45,10 @@ else:
                                     for msg in response["messages"])
 
         if contains_tool_message:
-            st.chat_message("assistant", avatar="utils/icon.png").markdown(
+            st.chat_message("assistant", avatar=avatar_icon_path).markdown(
                 response_last_message, unsafe_allow_html=True)
             st.session_state.chatbot_messages.append(
-                {"role": "assistant", "avatar": "utils/icon.png", "content": response_last_message})
+                {"role": "assistant", "avatar": avatar_icon_path, "content": response_last_message})
         else:
             st.chat_message("assistant").markdown(
                 response_last_message, unsafe_allow_html=True)

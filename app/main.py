@@ -2,11 +2,12 @@ import streamlit as st
 import logging
 import os
 from utils.logging import setup_logging
+from utils.globalVariables import page_icon_path
 
 developer_mode = os.getenv("DEVELOPER_MODE", "false").lower() == "true"
 setup_logging(logging.DEBUG)
 
-st.set_page_config(page_title="ScribaLLM", page_icon="utils/icon.png",
+st.set_page_config(page_title="ScribaLLM", page_icon=page_icon_path,
                    layout="centered", initial_sidebar_state="expanded")
 settings_page = st.Page('settings.py', title='Settings', icon='⚙️')
 ocr_page = st.Page('ocr.py', title='OCR', icon='📝')
