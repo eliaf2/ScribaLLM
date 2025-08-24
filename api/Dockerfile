@@ -16,9 +16,7 @@ RUN apt-get update && apt-get install -y \
 # Check that libGL.so.1 is found
 RUN ldconfig -p | grep libGL.so.1 || echo "libGL.so.1 not found"
 
-ARG GITHUB_REPO
-ARG GITHUB_BRANCH=main
-RUN git clone --depth 1 --branch ${GITHUB_BRANCH} https://github.com/${GITHUB_REPO}.git /tmp/repo && \
+RUN git clone --depth 1 --branch main https://github.com/eliaf2/ScribaLLM.git /tmp/repo && \
     cp -r /tmp/repo/api/* /api/ && \
     rm -rf /tmp/repo
 

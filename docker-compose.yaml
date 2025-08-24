@@ -6,10 +6,7 @@ services:
     container_name: frontend
     ports:
       - "8080:8501"
-    environment:
-      - GITHUB_REPO=eliaf2/ScribaLLM
-      - GITHUB_BRANCH=main
-
+    
   api:
     build:
       context: ./api
@@ -17,6 +14,3 @@ services:
     container_name: api
     ports:
       - "8000:8000"
-    environment:
-      - GITHUB_REPO=eliaf2/ScribaLLM
-      - GITHUB_BRANCH=main

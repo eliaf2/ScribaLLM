@@ -11,9 +11,7 @@ RUN apt-get update && apt-get install -y \
     libmagic-dev \
     && rm -rf /var/lib/apt/lists/*
 
-ARG GITHUB_REPO
-ARG GITHUB_BRANCH=main
-RUN git clone --depth 1 --branch ${GITHUB_BRANCH} https://github.com/${GITHUB_REPO}.git /tmp/repo && \
+RUN git clone --depth 1 --branch main https://github.com/eliaf2/ScribaLLM.git /tmp/repo && \
     cp -r /tmp/repo/app/* /app/ && \
     rm -rf /tmp/repo
 
