@@ -1,5 +1,5 @@
 services:
-  scriballm:
+  frontend:
     build: 
       context: ./app
       dockerfile: Dockerfile.dev
@@ -9,7 +9,7 @@ services:
     volumes:
       - ./app:/app:ro
 
-  apimodel:
+  api:
     build: 
       context: ./api
       dockerfile: Dockerfile.dev

@@ -1,5 +1,5 @@
 services:
-  scriballm:
+  frontend:
     build:
       context: ./app
       dockerfile: Dockerfile
@@ -10,7 +10,7 @@ services:
       - GITHUB_REPO=eliaf2/ScribaLLM
       - GITHUB_BRANCH=main
 
-  apimodel:
+  api:
     build:
       context: ./api
       dockerfile: Dockerfile
