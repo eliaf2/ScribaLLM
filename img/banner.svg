@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="1315.1182"
+   height="315.1181"
+   viewBox="0 0 347.95835 83.374997"
+   version="1.1"
+   id="svg1"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs1">
+    <linearGradient
+       id="linearGradient5">
+      <stop
+         style="stop-color:#000000;stop-opacity:1;"
+         offset="0.55855668"
+         id="stop5" />
+      <stop
+         style="stop-color:#000000;stop-opacity:0.80266666;"
+         offset="1"
+         id="stop6" />
+    </linearGradient>
+    <radialGradient
+       xlink:href="#linearGradient5"
+       id="radialGradient6"
+       cx="173.17061"
+       cy="43.524563"
+       fx="173.17061"
+       fy="43.524563"
+       r="147.52083"
+       gradientTransform="matrix(1.2362711,0,1.4015889e-8,0.4479467,-40.915217,21.27512)"
+       gradientUnits="userSpaceOnUse" />
+  </defs>
+  <g
+     id="layer1"
+     transform="translate(2,2)">
+    <rect
+       style="fill:url(#radialGradient6);fill-opacity:1;stroke:#ffffff;stroke-width:4;stroke-linejoin:round;stroke-opacity:1;paint-order:stroke fill markers"
+       id="rect3"
+       width="343.95834"
+       height="79.375"
+       x="0"
+       y="0"
+       ry="5.1674066" />
+    <g
+       id="g1"
+       transform="matrix(0.51773117,0,0,0.52130381,14.127969,15.843631)"
+       style="stroke-width:1.92488">
+      <g
+         id="g7"
+         style="stroke:#ffffff;stroke-width:1.92488;stroke-opacity:1"
+         transform="translate(-35.179346,-33.147089)">
+        <path
+           style="display:inline;fill:#ffffff;fill-opacity:1;stroke:#ffffff;stroke-width:2.11736;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
+           d="M 61.785984,93.415398 C 60.223727,87.642792 63.899566,29.597465 114.60236,29.480651 112.95186,82.070209 74.176848,95.05057 68.373671,96.01776 l 0.213533,-2.908066 C 98.399088,88.496332 113.95666,50.717319 113.02794,30.835736 81.516858,29.597465 63.260036,64.645182 62.594861,90.988515 c 0,0 1.164133,-0.141127 -0.808877,2.426883 z"
+           id="path5" />
+        <path
+           style="display:inline;fill:#ffffff;fill-opacity:1;stroke:#ffffff;stroke-width:0.96244;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
+           d="m 102.21826,67.8928 c -2.738372,0.458712 -3.786572,0.715434 -7.362592,0.826648 -3.91199,0.121662 -2.89029,-1.034046 0.0403,-1.65271 3.05503,-0.644933 7.722772,-2.097293 9.307142,-2.482681 z"
+           id="path7" />
+      </g>
+      <path
+         style="fill:none;fill-opacity:1;stroke:#ffffff;stroke-width:2.88731;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
+         d="m 32.550749,62.20221 -5.221104,11.721601 10.256501,1.77791 -22.451366,17.07048 -0.736824,-26.794403 7.335042,5.282113 4.87364,-10.991602 C 35.631557,31.309227 63.850518,12.660202 65.734848,10.775878 61.470318,14.643701 38.199157,46.110813 32.550749,62.20221 Z"
+         id="path1-1" />
+    </g>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:38.7923px;font-family:Mayonice;-inkscape-font-specification:'Mayonice, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-align:center;text-anchor:middle;fill:#000000;stroke:#ffffff;stroke-width:4;stroke-linejoin:round;paint-order:stroke fill markers"
+       x="189.49074"
+       y="53.898426"
+       id="text1"
+       transform="scale(0.99845271,1.0015497)"><tspan
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:38.7923px;font-family:Mayonice;-inkscape-font-specification:'Mayonice, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;stroke-width:4"
+         x="189.49074"
+         y="53.898426"
+         id="tspan2">ScribaLLM</tspan></text>
+  </g>
+</svg>
