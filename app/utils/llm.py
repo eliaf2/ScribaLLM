@@ -53,7 +53,7 @@ class AgentState(TypedDict):
 
 
 class OCR_LLM:
-    
+
     temperature = 0.2
 
     def __init__(self, openai_api_key: SecretStr, openai_llm_model: str, gemini_api_key: SecretStr, gemini_llm_model: str, context: str = ''):
@@ -710,6 +710,30 @@ class ChromaVectorStore:
             logging.error(f"Failed to get database stats: {e}")
             return {"status": "Error", "error": str(e)}
 
+    def _get_topic(self, docs: List[Document]) -> str:
+        '''Get the main topic of the provided list of Document objects related to one source.
+
+        Parameters
+        ----------
+        docs : List[Document]
+            A list of Document objects to analyze.
+
+        Returns
+        -------
+        str
+            The main topic of the documents.
+        '''
+        content = "".join([doc.page_content for doc in docs])
+
+        llm = init_chat_model(model='gpt-4.1-nano', model_provider="openai",
+                              api_key=self.openai_api_key, temperature=0.1)
+        system_prompt = """You are an expert at summarizing document topics in a few words. Given the content of a document, provide a concise topic that captures its main subject. Max 30 words"""
+
+        response = llm.invoke(
+            [SystemMessage(content=system_prompt)]+[HumanMessage(content=content)])
+
+        return response.content if response else "Unknown"    # type: ignore
+
     def save_to_chroma(self) -> None:
         '''Update the Chroma database with new or changed documents.
         '''
@@ -758,20 +782,24 @@ class ChromaVectorStore:
 
                 for source, docs in documents_by_source.items():
                     doc_hash = self._calculate_source_hash(docs)
-                    metadata["documents"][source] = doc_hash
+                    if source not in metadata["documents"] or metadata["documents"][source]["hash"] != doc_hash:
+                        topic = self._get_topic(docs)
+                        metadata["documents"][source] = {
+                            "hash": doc_hash,
+                            "topic": topic
+                        }
 
                 self._save_metadata(metadata)
 
                 logging.info(
                     f"Successfully saved {len(chunks_to_process)} chunks to {self.config.chroma_path}.")
-                
+
                 stats = self.get_database_stats()
                 logging.info(f"Database generation completed. Stats: {stats}")
 
         except Exception as e:
             logging.error(f"Failed to save to Chroma: {e}")
             raise
-
 
     def remove_documents_by_source(self, source_path: str) -> Dict[str, Any]:
         '''Remove all embeddings from a specific source file.
@@ -840,11 +868,10 @@ class ChromaVectorStore:
             if source_path in metadata.get("documents", {}):
                 del metadata["documents"][source_path]
                 self._save_metadata(metadata)
-            
 
             logging.info(
                 f"Removed {len(matching_ids)} documents from source: {source_path}")
-            
+
             # Delete the source file from disk
             try:
                 if os.path.exists(source_path):
@@ -853,7 +880,8 @@ class ChromaVectorStore:
                 else:
                     logging.warning(f"Source file not found: {source_path}")
             except Exception as e:
-                logging.error(f"Failed to delete source file {source_path}: {e}")
+                logging.error(
+                    f"Failed to delete source file {source_path}: {e}")
 
             return {
                 "status": "success",
@@ -873,49 +901,50 @@ class ChromaVectorStore:
 
     def get_source_statistics(self) -> pd.DataFrame:
         '''Get aggregated statistics for each source file in the database.
-        
+
         Returns
         -------
         pd.DataFrame
             A DataFrame containing statistics aggregated by source file.
-            Columns include: source, filename, total_chunks, total_content_length,
+            Columns include: source, filename, topic, total_chunks, total_content_length,
             avg_chunk_size, min_chunk_size, max_chunk_size, first_chunk_id, last_chunk_id.
         '''
         try:
             if not os.path.exists(self.config.chroma_path):
                 logging.warning("Database not found")
                 return pd.DataFrame()
-            
+
             if not self.embeddings:
                 self._initialize_embeddings()
-            
+
             db = Chroma(
                 persist_directory=self.config.chroma_path,
                 embedding_function=self.embeddings,
                 collection_name=self.config.collection_name
             )
-            
+
             # Get all documents from the collection
             collection = db._collection
             results = collection.get()
-            
+            documents_metadata = self._load_existing_metadata()
+
             if not results['documents']:
                 logging.info("No documents found in the database")
                 return pd.DataFrame()
-            
+
             # Group data by source
             source_data = {}
-            
+
             for doc_id, document, metadata in zip(
-                results['ids'], 
-                results['documents'], 
+                results['ids'],
+                results['documents'],
                 results['metadatas']    # type: ignore
             ):
                 if not metadata or 'source' not in metadata:
                     continue
-                    
+
                 source = metadata['source']
-                
+
                 if source not in source_data:
                     source_data[source] = {
                         'documents': [],
@@ -923,56 +952,65 @@ class ChromaVectorStore:
                         'chunk_ids': [],
                         'metadata': metadata
                     }
-                
+
                 source_data[source]['documents'].append({
                     'id': doc_id,
                     'content': document,
                     'content_length': len(document),
                     'metadata': metadata
                 })
-                
+
                 chunk_size = metadata.get('chunk_size', len(document))
                 source_data[source]['chunk_sizes'].append(chunk_size)
-                
+
                 chunk_id = metadata.get('chunk_id', 0)
                 source_data[source]['chunk_ids'].append(chunk_id)
-            
+
             # Calculate statistics for each source
             stats_data = []
-            
+
             for source, data in source_data.items():
                 documents = data['documents']
                 chunk_sizes = data['chunk_sizes']
                 chunk_ids = data['chunk_ids']
                 sample_metadata = data['metadata']
-                
-                # Extract filename from source path
+
                 filename = os.path.basename(source) if source else 'unknown'
-                
+                topic = documents_metadata["documents"].get(
+                    source, {}).get("topic", "Unknown")
+
                 # Calculate statistics
                 total_chunks = len(documents)
-                total_content_length = sum(doc['content_length'] for doc in documents)
-                avg_chunk_size = sum(chunk_sizes) / len(chunk_sizes) if chunk_sizes else 0
+                total_content_length = sum(
+                    doc['content_length'] for doc in documents)
+                avg_chunk_size = sum(chunk_sizes) / \
+                    len(chunk_sizes) if chunk_sizes else 0
                 min_chunk_size = min(chunk_sizes) if chunk_sizes else 0
                 max_chunk_size = max(chunk_sizes) if chunk_sizes else 0
                 min_chunk_id = min(chunk_ids) if chunk_ids else 0
                 max_chunk_id = max(chunk_ids) if chunk_ids else 0
-                
+
                 # Get total chunks from metadata (if available)
-                total_chunks_in_source = sample_metadata.get('total_chunks', total_chunks)
-                
+                total_chunks_in_source = sample_metadata.get(
+                    'total_chunks', total_chunks)
+
                 # Calculate additional metrics
-                avg_content_length = total_content_length / total_chunks if total_chunks > 0 else 0
-                
+                avg_content_length = total_content_length / \
+                    total_chunks if total_chunks > 0 else 0
+
                 # Check if this source appears to be complete (all chunks present)
-                expected_chunk_ids = set(range(total_chunks_in_source)) if total_chunks_in_source else set()
+                expected_chunk_ids = set(
+                    range(total_chunks_in_source)) if total_chunks_in_source else set()
                 actual_chunk_ids = set(chunk_ids)
-                is_complete = expected_chunk_ids.issubset(actual_chunk_ids) if expected_chunk_ids else True
-                missing_chunks = len(expected_chunk_ids - actual_chunk_ids) if expected_chunk_ids else 0
-                
+                is_complete = expected_chunk_ids.issubset(
+                    actual_chunk_ids) if expected_chunk_ids else True
+                missing_chunks = len(
+                    expected_chunk_ids - actual_chunk_ids) if expected_chunk_ids else 0
+
                 stats_row = {
                     'source': source,
                     'filename': filename,
+                    'topic': topic,
                     'total_chunks': total_chunks,
                     'total_chunks_expected': total_chunks_in_source,
                     'missing_chunks': missing_chunks,
@@ -986,24 +1024,24 @@ class ChromaVectorStore:
                     'first_chunk_id': min_chunk_id,
                     'last_chunk_id': max_chunk_id,
                 }
-                
+
                 # Add any additional metadata that might be useful
                 for key in ['filename', 'source']:
                     if key in sample_metadata and key not in stats_row:
                         stats_row[f'metadata_{key}'] = sample_metadata[key]
-                
+
                 stats_data.append(stats_row)
-            
+
             # Create DataFrame
             df = pd.DataFrame(stats_data)
-            
+
             # Sort by source name for consistent ordering
             if not df.empty:
                 df = df.sort_values('source').reset_index(drop=True)
-            
+
             logging.info(f"Generated statistics for {len(df)} sources")
             return df
-            
+
         except Exception as e:
             logging.error(f"Failed to get source statistics: {e}")
             return pd.DataFrame()
@@ -1023,7 +1061,7 @@ class GradeDocuments(BaseModel):
 
 
 class ChatbotLLM:
-    
+
     temperature = 1.0
 
     def __init__(self, openai_api_key: SecretStr, openai_llm_model: str, chroma_config: ChromaConfig):
@@ -1045,11 +1083,7 @@ class ChatbotLLM:
             collection_name=self.chroma_config.collection_name
         )
         self.retriever = self.vectorstore.as_retriever()
-        retriever_description = f"""Use this tool to search the user’s private technical notes when a question may involve detailed, 
-        domain-specific, or previously recorded information. The notes include high-level technical content in mathematics, 
-        physics, and science (such as formulas, derivations, definitions, proofs, physical laws, and scientific explanations). 
-        Always call this tool if the user requests specific technical details or asks about 
-        concepts that may be more accurate, complete, or personalized if retrieved from their notes rather than general knowledge."""
+        retriever_description = """Search the user's technical notes for detailed, domain-specific, or previously recorded information. Use when the user asks for specific technical details that may be in their personal notes."""
 
         self.retriever_tool = create_retriever_tool(
             retriever=self.retriever,
@@ -1134,9 +1168,31 @@ class ChatbotLLM:
         Dict[str, Any]
             The updated state with the generated response appended to messages.
         '''
+        with open(self.chroma_config.chroma_path + "/document_metadata.json", 'r', encoding='utf-8') as f:
+            document_metadata = json.load(f)
+
+        topics = [doc["topic"]
+                  for doc in document_metadata.get("documents", {}).values()]
+        topics_str = "\n- " + "\n- ".join(topics)
+
+        system_prompt = f"""You are an AI assistant with access to a retriever tool that can search for relevant information from a knowledge base.
+
+        IMPORTANT: You must call the retriever tool when the user's question relates to any of these topics: {topics_str}
+
+        Instructions:
+        1. Analyze each user question to determine if it relates to any of the specified topics;
+        2. If the question relates to one or more of these topics, you MUST call the retriever_tool before providing your answer;
+        3. Use the retrieved information to provide accurate, well-informed responses;
+        4. If the question does not relate to any of these topics, you answer directly without using the tool;
+        5. When in doubt about whether a question relates to these topics, use the retriever tool.
+
+        IMPORTANT: If, by using the retriever tool, you do not find relevant information, you may answer based on your existing knowledge and tell the user that the information is not available in the knowledge base.
+
+        The retriever tool will help you find the most relevant and up-to-date information from the knowledge base to answer questions about these topics accurately."""
+
         response = (
             self.llm
-            .bind_tools([self.retriever_tool]).invoke(state["messages"])
+            .bind_tools([self.retriever_tool]).invoke([SystemMessage(content=system_prompt)] + state["messages"])
         )
         return {"messages": [response]}
 
