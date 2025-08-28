@@ -17,6 +17,9 @@
   - [Interface](#interface)
 - [Settings page](#settings-page)
 - [Debug page](#debug-page)
+- [Other utils](#other-utils)
+  - [Logging](#logging)
+  - [Token Usage Handler](#token-usage-handler)
 
 <!-- /code_chunk_output -->
 
@@ -670,4 +673,20 @@ if st.session_state:
     st.table(session_state_df)
 else:
     st.write("No session state keys available.")
+```
+
+## Other utils
+### Logging
+The `utils/logging.py` script contains the logging configuration implemented using the `logging` library. The `setup_logging` method defines `FileHandler` to save log messages to a file. If `console_logging==True`, also the `StreamHandler` is initialized to print messages on the terminal.
+
+### Token Usage Handler
+The `utils/llm.py` script contains the `TokenUsageHandler` class that extends `BaseCallbackHandler` to track token usage of LLM interactions. 
+The `on_llm_end` method is automatically triggered when LLM calls complete, extracting usage metadata from the response and accumulating token counts. The `get_token_usage` method returns a dictionary containing the current token usage statistics, enabling monitoring of LLM resource consumption throughout the application's execution.
+A `TokenUsageHandler` object is defined in `main.py` and saved in `st.session_state`. It tracks LLM calls because it is passed in their definition, like in this example:
+```python
+self.llm = init_chat_model(model=self.gemini_llm_model,   
+                            model_provider="google_genai",
+                            api_key=self.gemini_api_key, 
+                            temperature=self.temperature, 
+                            callbacks=[self.token_usage_handler])
 ```

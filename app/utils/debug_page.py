@@ -45,6 +45,40 @@ except FileNotFoundError:
 except Exception as e:
     st.error(f"Error reading log file: {e}")
 
+st.write("## Total Token Usage")
+
+if "cost_input_token" not in st.session_state:
+    st.session_state.cost_input_token = 0.0
+if "cost_output_token" not in st.session_state:
+    st.session_state.cost_output_token = 0.0
+
+st.session_state.cost_input_token = st.number_input(
+    "Enter cost per 1M input tokens (in your currency):", min_value=0.0, value=st.session_state.cost_input_token, step=0.1
+)
+st.session_state.cost_output_token = st.number_input(
+    "Enter cost per 1M output tokens (in your currency):", min_value=0.0, value=st.session_state.cost_output_token, step=0.1
+)
+
+if st.session_state.token_usage_handler:
+    token_usage = st.session_state.token_usage_handler.get_token_usage()
+    token_usage_table = ""
+    token_usage_table += f"""
+    |                | Value               |
+    |----------------|---------------------|
+    | Input Tokens   | {token_usage['input_tokens']} |
+    | Output Tokens  | {token_usage['output_tokens']} |
+    | Total Tokens   | {token_usage['total_tokens']} |
+    """
+else:
+    st.error("No token usage information available.")
+
+if st.session_state.cost_input_token > 0 and st.session_state.cost_output_token > 0 and token_usage_table:
+    total_cost = (token_usage['input_tokens'] / 1e6) * st.session_state.cost_input_token + (token_usage['output_tokens'] / 1e6) * st.session_state.cost_output_token
+    token_usage_table += f"""| Total Cost     | {total_cost:.2f} |"""
+
+if token_usage_table:
+    st.markdown(token_usage_table)
+
 st.write("## Session State Keys")
 if st.session_state:
     session_state_df = pd.DataFrame(

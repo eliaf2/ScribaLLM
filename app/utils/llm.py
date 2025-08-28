@@ -1,5 +1,7 @@
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import SystemMessage, AIMessage, HumanMessage, ToolMessage
+from langchain.callbacks.base import BaseCallbackHandler
+from langchain.schema import LLMResult
 from typing import TypedDict, Literal, List, Dict, Any
 from pydantic import BaseModel, Field, SecretStr
 from langgraph.graph import StateGraph, END, MessagesState
@@ -23,6 +25,48 @@ import pandas as pd
 from langchain.tools.retriever import create_retriever_tool
 from langgraph.prebuilt import ToolNode, tools_condition
 
+
+class TokenUsageHandler(BaseCallbackHandler):
+    def __init__(self):
+        super().__init__()
+        self.input_tokens = 0
+        self.output_tokens = 0
+        self.total_tokens = 0
+        logging.debug("TokenUsageHandler initialized.")
+
+    def on_llm_end(self, response: LLMResult, **kwargs):
+        '''Add token usage when LLMs are invoked.
+
+        Parameters
+        ----------
+        response : LLMResult
+            The response from the LLM containing usage metadata.
+        '''
+        for gen_list in response.generations:
+            for gen in gen_list:
+                usage = getattr(gen.message, "usage_metadata", None)    # type: ignore
+                if usage:
+                    self.input_tokens += usage.get("input_tokens", 0)
+                    self.output_tokens += usage.get("output_tokens", 0)
+                    self.total_tokens += usage.get("total_tokens", 0)
+        logging.debug(f"Token usage updated: Input={self.input_tokens}, Output={self.output_tokens}, Total={self.total_tokens}")
+
+    def get_token_usage(self) -> Dict[str, int]:
+        '''Get the current token usage values.
+
+        Returns
+        -------
+        Dict[str, int]
+            A dictionary containing the input, output, and total token counts.
+        '''
+        return {
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_tokens": self.total_tokens
+        }
+
+
+# =======================================
 
 class ImageClassificationStructure(BaseModel):
     classification: Literal["text", "picture"] = Field(
@@ -56,24 +100,25 @@ class OCR_LLM:
 
     temperature = 0.2
 
-    def __init__(self, openai_api_key: SecretStr, openai_llm_model: str, gemini_api_key: SecretStr, gemini_llm_model: str, context: str = ''):
+    def __init__(self, openai_api_key: SecretStr, openai_llm_model: str, gemini_api_key: SecretStr, gemini_llm_model: str, token_usage_handler: TokenUsageHandler, context: str = ''):
         self.openai_api_key = openai_api_key
         self.openai_llm_model = openai_llm_model
         self.gemini_api_key = gemini_api_key
         self.gemini_llm_model = gemini_llm_model
         self.context = context if context else "converting written text to digital format"
+        self.token_usage_handler = token_usage_handler
 
         if not self.openai_api_key and not self.gemini_api_key:
             raise ValueError(
                 "No API key provided. Please set either OpenAI or Gemini API key.")
         elif self.gemini_api_key:
             self.llm = init_chat_model(model=self.gemini_llm_model, model_provider="google_genai",
-                                       api_key=self.gemini_api_key, temperature=self.temperature)
+                                       api_key=self.gemini_api_key, temperature=self.temperature, callbacks=[self.token_usage_handler])
             logging.info(
                 f"OCR_LLM initialized successfully with model: {self.gemini_llm_model}")
         elif self.openai_api_key:
             self.llm = init_chat_model(model=self.openai_llm_model, model_provider="openai",
-                                       api_key=self.openai_api_key, temperature=self.temperature)
+                                       api_key=self.openai_api_key, temperature=self.temperature, callbacks=[self.token_usage_handler])
             logging.info(
                 f"OCR_LLM initialized successfully with model: {self.openai_llm_model}")
 
@@ -394,10 +439,10 @@ class OCR_LLM:
                 "No API key provided. Please set either OpenAI or Gemini API key.")
         elif self.gemini_api_key:
             optimizer_llm = init_chat_model(model=self.gemini_llm_model, model_provider="google_genai",
-                                            api_key=self.gemini_api_key, temperature=temperature)
+                                            api_key=self.gemini_api_key, temperature=temperature, callbacks=[self.token_usage_handler])
         elif self.openai_api_key:
             optimizer_llm = init_chat_model(model=self.openai_llm_model, model_provider="openai",
-                                            api_key=self.openai_api_key, temperature=temperature)
+                                            api_key=self.openai_api_key, temperature=temperature, callbacks=[self.token_usage_handler])
 
         text = ''
         for page in ocr_results:
@@ -425,8 +470,9 @@ class ChromaConfig(BaseModel):
 
 
 class ChromaVectorStore:
-    def __init__(self, config: ChromaConfig, openai_api_key: SecretStr):
+    def __init__(self, config: ChromaConfig, openai_api_key: SecretStr, token_usage_handler: TokenUsageHandler):
         self.config = config
+        self.token_usage_handler = token_usage_handler
         self.embeddings = None
         self.db = None
         self.metadata_file = Path(config.chroma_path) / \
@@ -726,7 +772,7 @@ class ChromaVectorStore:
         content = "".join([doc.page_content for doc in docs])
 
         llm = init_chat_model(model='gpt-4.1-nano', model_provider="openai",
-                              api_key=self.openai_api_key, temperature=0.1)
+                              api_key=self.openai_api_key, temperature=0.1, callbacks=[self.token_usage_handler])
         system_prompt = """You are an expert at summarizing document topics in a few words. Given the content of a document, provide a concise topic that captures its main subject. Max 30 words"""
 
         response = llm.invoke(
@@ -1064,15 +1110,16 @@ class ChatbotLLM:
 
     temperature = 1.0
 
-    def __init__(self, openai_api_key: SecretStr, openai_llm_model: str, chroma_config: ChromaConfig):
+    def __init__(self, openai_api_key: SecretStr, openai_llm_model: str, chroma_config: ChromaConfig, token_usage_handler: TokenUsageHandler):
         self.openai_api_key = openai_api_key
         self.openai_llm_model = openai_llm_model
         self.chroma_config = chroma_config
+        self.token_usage_handler = token_usage_handler
 
         self.llm = init_chat_model(model=self.openai_llm_model, model_provider="openai",
-                                   api_key=self.openai_api_key, temperature=self.temperature)
+                                   api_key=self.openai_api_key, temperature=self.temperature, callbacks=[self.token_usage_handler])
         self.grader_model = init_chat_model(model=self.openai_llm_model, model_provider="openai",
-                                            api_key=self.openai_api_key, temperature=0.0)
+                                            api_key=self.openai_api_key, temperature=0.0, callbacks=[self.token_usage_handler])
         self.grader_model = self.grader_model.with_structured_output(
             GradeDocuments)
 

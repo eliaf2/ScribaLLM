@@ -3,9 +3,16 @@ import logging
 import os
 from utils.logging import setup_logging
 from utils.globalVariables import page_icon_path
+from utils.llm import TokenUsageHandler
 
 developer_mode = os.getenv("DEVELOPER_MODE", "false").lower() == "true"
-setup_logging(logging.DEBUG)
+if developer_mode:
+    setup_logging(logging.DEBUG)
+else:
+    setup_logging(logging.INFO)
+
+if "token_usage_handler" not in st.session_state:
+    st.session_state.token_usage_handler = TokenUsageHandler()
 
 st.set_page_config(page_title="ScribaLLM", page_icon=page_icon_path,
                    layout="centered", initial_sidebar_state="expanded")

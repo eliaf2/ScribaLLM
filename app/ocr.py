@@ -141,7 +141,8 @@ def ocr_llm() -> tuple[list[str] | None, OCR_LLM]:
                   openai_llm_model=openai_llm_model,
                   gemini_api_key=gemini_api_key, 
                   gemini_llm_model=gemini_llm_model,
-                  context=st.session_state.context)
+                  context=st.session_state.context,
+                  token_usage_handler=st.session_state.token_usage_handler)
     ocr_results = list()
     for page_folder in sorted(os.listdir(tmp_crop_dir)):
         cropped_images_path = os.path.join(tmp_crop_dir, page_folder)
@@ -436,7 +437,9 @@ def add_results_to_database(results: str) -> None:
         f.write(results)
 
     vector_store = ChromaVectorStore(
-        my_chroma_config, st.session_state.openai_api_key)
+        my_chroma_config, st.session_state.openai_api_key,
+        st.session_state.token_usage_handler
+    )
     vector_store.save_to_chroma()
 
     stats = vector_store.get_database_stats()
@@ -598,7 +601,7 @@ if st.session_state.ocr_output == []:
 else:
     if isinstance(st.session_state.ocr_output, str):
         st.markdown(convert_markdown_images_to_base64(
-            st.session_state.ocr_output, clear=False), unsafe_allow_html=True)
+            st.session_state.ocr_output, clear=True), unsafe_allow_html=True)
 
         st.download_button(
             label="📥 Download",

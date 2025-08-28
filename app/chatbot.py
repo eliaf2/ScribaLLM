@@ -30,7 +30,11 @@ else:
     if prompt := st.chat_input():
 
         chatbot = ChatbotLLM(
-            openai_api_key=st.session_state.openai_api_key, openai_llm_model=st.session_state.openai_llm_model, chroma_config=my_chroma_config)
+            openai_api_key=st.session_state.openai_api_key, 
+            openai_llm_model=st.session_state.openai_llm_model, 
+            chroma_config=my_chroma_config,
+            token_usage_handler=st.session_state.token_usage_handler
+        )
         st.session_state.chatbot_messages.append(
             {"role": "user", "content": prompt})
         st.session_state.user_msgs_position.append(
