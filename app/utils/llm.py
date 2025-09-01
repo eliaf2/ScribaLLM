@@ -953,7 +953,7 @@ class ChromaVectorStore:
         pd.DataFrame
             A DataFrame containing statistics aggregated by source file.
             Columns include: source, filename, topic, total_chunks, total_content_length,
-            avg_chunk_size, min_chunk_size, max_chunk_size, first_chunk_id, last_chunk_id.
+            avg_content_length, avg_chunk_size, min_chunk_size, max_chunk_size.
         '''
         try:
             if not os.path.exists(self.config.chroma_path):
@@ -1009,17 +1009,12 @@ class ChromaVectorStore:
                 chunk_size = metadata.get('chunk_size', len(document))
                 source_data[source]['chunk_sizes'].append(chunk_size)
 
-                chunk_id = metadata.get('chunk_id', 0)
-                source_data[source]['chunk_ids'].append(chunk_id)
-
             # Calculate statistics for each source
             stats_data = []
 
             for source, data in source_data.items():
                 documents = data['documents']
                 chunk_sizes = data['chunk_sizes']
-                chunk_ids = data['chunk_ids']
-                sample_metadata = data['metadata']
 
                 filename = os.path.basename(source) if source else 'unknown'
                 topic = documents_metadata["documents"].get(
@@ -1033,48 +1028,22 @@ class ChromaVectorStore:
                     len(chunk_sizes) if chunk_sizes else 0
                 min_chunk_size = min(chunk_sizes) if chunk_sizes else 0
                 max_chunk_size = max(chunk_sizes) if chunk_sizes else 0
-                min_chunk_id = min(chunk_ids) if chunk_ids else 0
-                max_chunk_id = max(chunk_ids) if chunk_ids else 0
-
-                # Get total chunks from metadata (if available)
-                total_chunks_in_source = sample_metadata.get(
-                    'total_chunks', total_chunks)
 
                 # Calculate additional metrics
                 avg_content_length = total_content_length / \
                     total_chunks if total_chunks > 0 else 0
-
-                # Check if this source appears to be complete (all chunks present)
-                expected_chunk_ids = set(
-                    range(total_chunks_in_source)) if total_chunks_in_source else set()
-                actual_chunk_ids = set(chunk_ids)
-                is_complete = expected_chunk_ids.issubset(
-                    actual_chunk_ids) if expected_chunk_ids else True
-                missing_chunks = len(
-                    expected_chunk_ids - actual_chunk_ids) if expected_chunk_ids else 0
 
                 stats_row = {
                     'source': source,
                     'filename': filename,
                     'topic': topic,
                     'total_chunks': total_chunks,
-                    'total_chunks_expected': total_chunks_in_source,
-                    'missing_chunks': missing_chunks,
-                    'is_complete': is_complete,
                     'total_content_length': total_content_length,
                     'avg_content_length': round(avg_content_length, 2),
                     'avg_chunk_size': round(avg_chunk_size, 2),
                     'min_chunk_size': min_chunk_size,
                     'max_chunk_size': max_chunk_size,
-                    'chunk_id_range': f"{min_chunk_id}-{max_chunk_id}",
-                    'first_chunk_id': min_chunk_id,
-                    'last_chunk_id': max_chunk_id,
                 }
-
-                # Add any additional metadata that might be useful
-                for key in ['filename', 'source']:
-                    if key in sample_metadata and key not in stats_row:
-                        stats_row[f'metadata_{key}'] = sample_metadata[key]
 
                 stats_data.append(stats_row)
 
