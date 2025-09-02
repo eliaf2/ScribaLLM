@@ -49,7 +49,8 @@ class TokenUsageHandler(BaseCallbackHandler):
                     self.input_tokens += usage.get("input_tokens", 0)
                     self.output_tokens += usage.get("output_tokens", 0)
                     self.total_tokens += usage.get("total_tokens", 0)
-        logging.debug(f"Token usage updated: Input={self.input_tokens}, Output={self.output_tokens}, Total={self.total_tokens}")
+        logging.debug(
+            f"Token usage updated: Input={self.input_tokens}, Output={self.output_tokens}, Total={self.total_tokens}")
 
     def get_token_usage(self) -> Dict[str, int]:
         '''Get the current token usage values.
@@ -367,56 +368,6 @@ class OCR_LLM:
         return call['text'], call['list_pictures']
 
     def improve_ocr_result(self, ocr_results: list[str], context: str) -> str:
-
-        ocr_improvement_prompt = f"""You are tasked with improving OCR-converted text while preserving its original text, structure and formatting. Please follow these guidelines:
-
-            1. **Correct OCR errors**: Fix misread characters, words, and spacing issues
-            2. **Preserve markdown formatting**: Maintain all original markdown syntax including lists, emphasis, code blocks, tables, etc.
-            3. **Fix headers**: Using the context of the document, insert appropriate headers where necessary.
-            4. **Fix LaTeX formulas**: Correct formatting errors in mathematical expressions while preserving their mathematical meaning
-            5. **Preserve image links**: Do NOT modify any URLs or links that reference images
-
-            ## Specific Rules:
-
-            ### Text Correction:
-            - Fix obvious character recognition errors (e.g., "rn" misread as "m", "cl" as "d", "0" as "O")
-            - Correct spacing issues and word boundaries
-            - Fix punctuation errors
-            - Maintain the original language and writing style
-
-            ### Markdown Formatting:
-            - Keep all headers (#, ##, ###, etc.) intact
-            - Preserve bullet points, numbered lists, and indentation
-            - Maintain emphasis markers (**, *, ~~, etc.)
-            - Keep code blocks (```) and inline code (``) formatting
-            - Maintain block quotes (>) and other markdown elements
-            - Maintain blockquotes (>) and other markdown elements
-
-            ### LaTeX Mathematical Expressions:
-            - Fix syntax errors in LaTeX formulas (missing brackets, incorrect commands, etc.)
-            - Correct common OCR mistakes in mathematical notation:
-            - Greek letters
-            - Mathematical operators
-            - Fraction notation
-            - Ensure proper bracket matching and command structure
-
-            ### Image Links:
-            - **NEVER modify image URLs or file paths**
-            - Keep all image reference syntax intact: `![alt text](image_url)` or `<img src="..."/>`
-            - Preserve any image-related markdown or HTML tags
-
-            ### Quality Control:
-            - Read the text in context to ensure corrections make logical sense
-            - When uncertain about a correction, err on the side of minimal changes
-            - Maintain consistency in terminology and formatting throughout the document
-
-            ## Output Format:
-            Return only the corrected text with no additional commentary, explanations, or metadata. The output should be ready to use as-is.
-
-            ---
-
-            **The text talks about:** {context}"""
-
         ocr_correction_prompt = f"""You are an OCR correction specialist. Your task is to fix OCR conversion errors in the following markdown text and rewrite it in a more readable format.
 
         STRICT RULES:
@@ -1099,7 +1050,7 @@ class ChatbotLLM:
             collection_name=self.chroma_config.collection_name
         )
         self.retriever = self.vectorstore.as_retriever()
-        retriever_description = """Search the user's technical notes for detailed, domain-specific, or previously recorded information. Use when the user asks for specific technical details that may be in their personal notes."""
+        retriever_description = """Search the user's notes for detailed, domain-specific, or previously recorded information."""
 
         self.retriever_tool = create_retriever_tool(
             retriever=self.retriever,
@@ -1114,6 +1065,7 @@ class ChatbotLLM:
         self.graph.add_node("retrieve", ToolNode([self.retriever_tool]))
         self.graph.add_node("rewrite_question", self._rewrite_question)
         self.graph.add_node("generate_answer", self._generate_answer)
+        self.graph.add_node("markdown_converter", self._markdown_converter)
 
         self.graph.set_entry_point("generate_query_or_respond")
 
@@ -1122,7 +1074,7 @@ class ChatbotLLM:
             tools_condition,
             {
                 "tools": "retrieve",
-                END: END,
+                END: "markdown_converter",
             },
         )
 
@@ -1130,8 +1082,9 @@ class ChatbotLLM:
             "retrieve",
             self._grade_documents,
         )
-        self.graph.add_edge("generate_answer", END)
+        self.graph.add_edge("generate_answer", "markdown_converter")
         self.graph.add_edge("rewrite_question", "generate_query_or_respond")
+        self.graph.add_edge("markdown_converter", END)
 
         self.app = self.graph.compile()
 
@@ -1191,7 +1144,7 @@ class ChatbotLLM:
                   for doc in document_metadata.get("documents", {}).values()]
         topics_str = "\n- " + "\n- ".join(topics)
 
-        system_prompt = f"""You are an AI assistant with access to a retriever tool that can search for relevant information from a knowledge base.
+        system_prompt = f"""You are an AI assistant with access to a retriever tool that can search for relevant information from user's notes.
 
         IMPORTANT: You must call the retriever tool when the user's question relates to any of these topics: {topics_str}
 
@@ -1276,6 +1229,44 @@ class ChatbotLLM:
         prompt = system_prompt.format(question=question, context=context)
         response = self.llm.invoke([{"role": "user", "content": prompt}])
         return {"messages": [response]}
+
+    def _markdown_converter(self, state: ChatbotMessagesState) -> Dict[str, Any]:
+        '''Convert the final message in the state to a markdown format.
+
+        Parameters
+        ----------
+        state : ChatbotMessagesState
+            The current state of the chatbot messages.
+
+        Returns
+        -------
+        Dict[str, Any]
+            The final message converted to markdown.
+        '''
+        final_message = state["messages"][-1]
+        system_prompt = """You are a text correction assistant that receives output from another LLM and fixes the text, given by the user, to be fixed in markdown:
+
+        ## Tasks
+        1. **Markdown formatting errors**: Fix headers, lists, code blocks, links, tables, emphasis
+        2. **Grammar and spelling**: Correct grammatical errors, typos, punctuation, capitalization  
+        3. **Mathematical formulas**: Convert to proper LaTeX format using `$...$` for inline math and `$$...$$` for display math
+
+        ## Rules
+        - Preserve original meaning and content
+        - Only make necessary corrections
+        - Maintain consistent formatting throughout
+        - Convert parentheses-wrapped math like ( f: G \to X ) to `$f: G \to X$`
+        - Convert complex equations to display format with `$$...$$`
+
+        ## Output
+        Return the corrected text with proper markdown, grammar, and LaTeX-formatted mathematics. Make corrections without explanatory comments."""
+
+        llm = init_chat_model(model='gpt-4.1-nano', model_provider="openai",
+                              api_key=self.openai_api_key, temperature=0.2, callbacks=[self.token_usage_handler])
+        new_message = HumanMessage(content=final_message.content)
+        response = llm.invoke(
+            [SystemMessage(content=system_prompt)]+[new_message])
+        return {"messages": [response.content]}
 
     def __call__(self, messages: list, human_msgs_position: list[int]) -> dict[str, Any] | Any:
         response = self.app.invoke(

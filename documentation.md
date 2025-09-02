@@ -485,7 +485,7 @@ The system employs a state graph architecture that allows the agent to handle va
 
 - **Direct Response**: For queries that don't require external information retrieval, the agent can respond immediately using its existing knowledge;
 - **Retrieval-Augmented Response**: When additional information is needed, the agent retrieves relevant documents and incorporates them into its response;
-- **Query Refinement**: If retrieved documents are deemed insufficient or irrelevant, the agent can rewrite the question to improve retrieval results;
+- **Query Refinement**: If retrieved documents are considered insufficient or irrelevant, the agent can rewrite the question to improve retrieval results;
 - **Iterative Processing**: The system can loop through retrieval and refinement cycles until satisfactory information is found.
 
 The graph is defined in the `__init__` method:
@@ -497,6 +497,7 @@ self.graph.add_node("generate_query_or_respond",
 self.graph.add_node("retrieve", ToolNode([self.retriever_tool]))
 self.graph.add_node("rewrite_question", self._rewrite_question)
 self.graph.add_node("generate_answer", self._generate_answer)
+self.graph.add_node("markdown_converter", self._markdown_converter)
 
 self.graph.set_entry_point("generate_query_or_respond")
 
@@ -505,7 +506,7 @@ self.graph.add_conditional_edges(
     tools_condition,
     {
         "tools": "retrieve",
-        END: END,
+        END: "markdown_converter",
     },
 )
 
@@ -513,10 +514,12 @@ self.graph.add_conditional_edges(
     "retrieve",
     self._grade_documents,
 )
-self.graph.add_edge("generate_answer", END)
+self.graph.add_edge("generate_answer", "markdown_converter")
 self.graph.add_edge("rewrite_question", "generate_query_or_respond")
+self.graph.add_edge("markdown_converter", END)
 
 self.app = self.graph.compile()
+
 ```
 
 Here is a visual representation of the graph:
@@ -526,7 +529,7 @@ Here is a visual representation of the graph:
 
 The entrypoint of execution is the `self._generate_query_or_respond` method inside the `generate_query_or_respond` node. It is designed as the first decision point for determining whether to use the `self.retriever_tool` for document retrieval or to directly invoke the LLM for an immediate response. Document retrieval functionality is handled by the `retrieve` node, which is defined via the prebuilt `ToolNode` class to implement the `self.retriever_tool` method.
 
-Following retrieval, the system employs the `self._grade_documents` method to evaluate the relevance of retrieved documents against the user's query. When documents are considered unrelated to the question, the system triggers the `self._rewrite_question` method to reformulate the query for improved retrieval results. Instead, when documents are determined to be relevant, the system generates the final response using the `self._generate_answer` method.
+Following retrieval, the system employs the `self._grade_documents` method to evaluate the relevance of retrieved documents against the user's query. When documents are considered unrelated to the question, the system triggers the `self._rewrite_question` method to reformulate the query for improved retrieval results. Instead, when documents are determined to be relevant, the system generates the final response using the `self._generate_answer` method. Finally, `self._markdown_converter` method converts the response in markdown format. 
 
 The architecture incorporates specialized system prompts for each processing node, with each prompt built to optimize language model performance for its specific task within the workflow. 
 

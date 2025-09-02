@@ -2,8 +2,27 @@ import streamlit as st
 import logging
 import os
 from utils.globalVariables import my_chroma_config, avatar_icon_path
-from utils.llm import ChromaConfig, ChatbotLLM
+from utils.llm import ChatbotLLM
 from langchain_core.messages import ToolMessage
+
+def clear_md(text: str) -> str:
+    '''Clear Markdown formatting from the text.
+
+    Parameters
+    ----------
+    text : str
+        The input text with Markdown formatting.
+
+    Returns
+    -------
+    str
+        The text without Markdown formatting.
+    '''
+    if text.startswith("```markdown"):
+        text = text[11:]  # Remove "```markdown" at beginning of the string
+    if text.endswith("```"):
+        text = text[:-3]  # Remove "```" at the end of the string
+    return text
 
 st.markdown('# Chatbot 💬')
 
@@ -39,11 +58,11 @@ else:
             {"role": "user", "content": prompt})
         st.session_state.user_msgs_position.append(
             len(st.session_state.chatbot_messages)-1)
-        st.chat_message("user").write(prompt)
+        st.chat_message("user").markdown(prompt, unsafe_allow_html=True)
 
         response = chatbot(st.session_state.chatbot_messages,
                         st.session_state.user_msgs_position)
-        response_last_message = response["messages"][-1].content
+        response_last_message = clear_md(response["messages"][-1].content)
 
         contains_tool_message = any(isinstance(msg, ToolMessage)
                                     for msg in response["messages"])
