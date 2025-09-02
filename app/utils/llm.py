@@ -1142,11 +1142,13 @@ class ChatbotLLM:
 
         topics = [doc["topic"]
                   for doc in document_metadata.get("documents", {}).values()]
-        topics_str = "\n- " + "\n- ".join(topics)
+        topics_str = "- " + "\n- ".join(topics)
 
         system_prompt = f"""You are an AI assistant with access to a retriever tool that can search for relevant information from user's notes.
 
-        IMPORTANT: You must call the retriever tool when the user's question relates to any of these topics: {topics_str}
+        IMPORTANT: You must call the retriever tool when the user's question relates to any of these topics: 
+        - ScribaLLM technical documentation
+        {topics_str}
 
         Instructions:
         1. Analyze each user question to determine if it relates to any of the specified topics;
