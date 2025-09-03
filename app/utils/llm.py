@@ -169,9 +169,6 @@ class OCR_LLM:
         Image.Image
             The compressed image as a PIL Image object.
         '''
-        from PIL import Image
-        import os
-        from io import BytesIO
 
         img = Image.open(input_path)
         img = img.convert('RGB')

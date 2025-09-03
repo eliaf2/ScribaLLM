@@ -33,10 +33,10 @@ In the following sections, each component of the software will be discussed in d
 
 ## Docker services
 The `run` script builds two docker images:
-- `scriballm-api` for the layout detection server.
-- `scriballm-frontend` for the streamlit server and AI agent functionalities;
+- `scriballm-api` for the layout detection server;
+- `scriballm-frontend` for the streamlit server and AI agent functionalities.
 
-By default, without any flags, the `run` script compiles the `docker-compose.yaml` file, which builds the repository by cloning it from github. 
+By default, without any flags, the `run` script compiles the `docker-compose.yaml` file, which builds the repository by cloning it from [Github](https://github.com/eliaf2/ScribaLLM). 
 If the `-dev` flag is invoked, then the `docker-compose.dev.yaml` is compiled and the local repository is built. This sets up the following volumes:
 - The `/app` volume within the `frontend` container is mounted with `read-only` permission .
 - The `/api` volume within the `api` container is mounted with `read-only` permission.
@@ -154,7 +154,8 @@ response = filter_detection(response["results"], types=['figure']) if response e
 
 The`save_cropped_images` function saves the detected parts in jpg in `/ScribaLLM/tmp/cropped` folder and `plot_cropped_images` displays them. Also the `plot_detection_frames` function plots the detection boxes on the page.
 
-When the `Convert to Text` button is pressed, the `ocr_llm` function is used a wrapper for the initialization and call of a `OCR_LLM` object, which is defined in `utils/llm.py`. How it works will be explained in the [next subsection](#ocr_llm). 
+When the `Convert to Text` button is pressed, the `ocr_llm` function is called. It defines a `OCR_LLM` object, which is defined in `utils/llm.py` and will be described in the [next subsection](#ocr_llm). This object is called for each page picture. Finally, `ocr_llm` returns a list with the converted text for each image.
+
 ```python
 st.session_state.ocr_output, llm = ocr_llm()
 
@@ -171,7 +172,7 @@ st.session_state.ocr_output = llm.improve_ocr_result(
     st.session_state.ocr_output = fix_url_pictures(st.session_state.ocr_output)
 ```
 
-The `improve_ocr_result` method receives as input the result and returns a unique output. Finally,
+The `improve_ocr_result` method receives as input the results and returns a unique output. In conclusion,
 ```python
 st.markdown(convert_markdown_images_to_base64(
             st.session_state.ocr_output, clear=False), unsafe_allow_html=True)
@@ -248,7 +249,7 @@ Here we show a graphical presentation of it:
 The agent state is defined by the `AgentState` class:
 ```python
 class AgentState(TypedDict):
-    page_b64: str  # Base64 representation of the input page image
+    page_b64: str
     pictures_folder: str
     context: str
     messages: list[HumanMessage | AIMessage | ToolMessage | SystemMessage]

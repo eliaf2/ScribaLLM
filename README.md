@@ -3,7 +3,7 @@
 </div>
 <br style="line-height: 100px;">
 
-Convert your PDF files into dynamic markdown with the power of Large Language Models.
+Convert your PDF files into dynamic markdown with the power of AI agents.
 
 
 <!-- @import "[TOC]" {cmd="toc" depthFrom=1 depthTo=2 orderedList=false} -->
@@ -24,20 +24,20 @@ Before getting started, make sure you have the following software packages insta
 - [Docker](https://docs.docker.com/get-started/get-docker/)
 - [Docker Compose](https://docs.docker.com/compose/install/)
 
-You will also need [OpenAI](https://platform.openai.com/docs/quickstart) and [Gemini API](https://ai.google.dev/gemini-api/docs/quickstart) keys.
+You will also need [OpenAI](https://platform.openai.com/docs/quickstart) and [Gemini](https://ai.google.dev/gemini-api/docs/quickstart) API keys.
 
 ## Installation
 1. Open PowerShell (Windows) or Terminal (Linux/macOS) and clone the repository:
-   ```zsh
+   ```bash
    git clone https://github.com/eliaf2/ScribaLLM.git
    ```
 2. Move to the repository:
-   ```zsh
+   ```bash
    cd path/to/repository
    ```
 3. Compile the repository:
     **Linux/macOS (zsh)**
-   ```zsh
+   ```bash
    zsh run.sh
    ```
    **Windows (PowerShell)**
